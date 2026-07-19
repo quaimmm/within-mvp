@@ -1,0 +1,34 @@
+{
+  "name": "within-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "test": "node --experimental-transform-types --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "next": "^16.0.0",
+    "openai": "^6.48.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "viem": "^2.55.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.0.0",
+    "postcss": "^8.5.20",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

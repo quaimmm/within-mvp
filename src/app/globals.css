@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-canvas: #f7f7f4;
+  --color-sidebar: #f1f1ed;
+  --color-surface: #fdfdfb;
+  --color-ink: #171815;
+  --color-muted: #6f716c;
+  --color-faint: #a5a7a1;
+  --color-border: #e5e5df;
+  --color-border-strong: #d9dad4;
+  --color-placeholder: #ecece7;
+  --color-accent: #3157d5;
+  --color-accent-hover: #284abc;
+  --color-accent-soft: #e9edfb;
+  --color-success: #357257;
+  --color-success-soft: #e7f1eb;
+
+  --width-sidebar: 224px;
+  --height-topbar: 72px;
+  --radius-card: 16px;
+  --shadow-hairline: 0 1px 2px rgba(23, 24, 21, 0.025);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", sans-serif;
+}
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-14: 56px;
+  --space-16: 64px;
+}
+
+* { box-sizing: border-box; }
+html { min-width: 1024px; background: #f7f7f4; }
+body { margin: 0; min-height: 100vh; background: #f7f7f4; color: #171815; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", sans-serif; font-weight: 400; letter-spacing: -0.012em; -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+
+@keyframes pulse-soft { 0%, 100% { opacity: .62; } 50% { opacity: 1; } }
+.animate-pulse-soft { animation: pulse-soft 2.4s ease-in-out infinite; }
+@keyframes drawer-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes decision-in { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: scale(1); } }
+.animate-drawer-in { animation: drawer-in 280ms cubic-bezier(.22,.8,.3,1) both; }
+.animate-fade-in { animation: fade-in 200ms ease-out both; }
+.animate-toast-in { animation: toast-in 260ms cubic-bezier(.22,.8,.3,1) both; }
+.animate-decision-in { animation: decision-in 300ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

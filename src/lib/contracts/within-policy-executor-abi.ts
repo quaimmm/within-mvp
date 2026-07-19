@@ -1,0 +1,52 @@
+export const withinPolicyExecutorAbi = [
+  {
+    type: "function",
+    name: "owner",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "setPolicy",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "policyId", type: "bytes32" },
+      { name: "maxPerTransaction", type: "uint256" },
+      { name: "periodLimit", type: "uint256" },
+      { name: "active", type: "bool" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "setPolicyActive",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "policyId", type: "bytes32" },
+      { name: "active", type: "bool" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "executePayment",
+    stateMutability: "payable",
+    inputs: [
+      { name: "executionId", type: "bytes32" },
+      { name: "policyId", type: "bytes32" },
+      { name: "recipient", type: "address" },
+    ],
+    outputs: [],
+  },
+  { type: "error", name: "PolicyInactive", inputs: [] },
+  { type: "error", name: "TransactionLimitExceeded", inputs: [] },
+  { type: "error", name: "PeriodLimitExceeded", inputs: [] },
+  { type: "error", name: "ExecutionAlreadyUsed", inputs: [] },
+  { type: "error", name: "UnauthorizedExecutor", inputs: [] },
+  { type: "error", name: "InvalidAddress", inputs: [] },
+  { type: "error", name: "InvalidPolicy", inputs: [] },
+  { type: "error", name: "PolicyNotFound", inputs: [] },
+  { type: "error", name: "InvalidAmount", inputs: [] },
+  { type: "error", name: "PaymentTransferFailed", inputs: [] },
+] as const;
