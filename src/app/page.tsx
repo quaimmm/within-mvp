@@ -1,5 +1,5 @@
-import WithinApp from "@/components/within-app";
+import LandingPage from "@/components/landing-page";
 
 export default function Home() {
-  return <WithinApp />;
+  return <LandingPage />;
 }

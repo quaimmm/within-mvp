@@ -2,11 +2,9 @@ import { createPublicClient, createWalletClient, getAddress, http, isAddress, ke
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 import { withinPolicyExecutorAbi } from "@/lib/contracts/within-policy-executor-abi";
+import { ARC_TESTNET } from "@/lib/arc/network";
 import { PolicyPublishingError } from "./policy-publisher";
 import type { PolicyPublisher, PolicyPublishRequest, PolicyPublishResult } from "./policy-publisher";
-
-const ARC_EXPLORER_URL = "https://testnet.arcscan.app";
-const DEFAULT_ARC_RPC_URL = "https://rpc.testnet.arc.network";
 
 type ArcPolicyConfiguration = {
   rpcUrl: string;
@@ -21,7 +19,7 @@ function loadConfiguration(): ArcPolicyConfiguration {
   if (!privateKey || !/^0x[0-9a-fA-F]{64}$/.test(privateKey)) throw new PolicyPublishingError();
   if (!contractAddress || !isAddress(contractAddress)) throw new PolicyPublishingError();
   return {
-    rpcUrl: process.env.ARC_RPC_URL || DEFAULT_ARC_RPC_URL,
+    rpcUrl: process.env.ARC_RPC_URL || ARC_TESTNET.rpcUrl,
     privateKey: privateKey as `0x${string}`,
     contractAddress: getAddress(contractAddress),
   };
@@ -90,7 +88,7 @@ export class ArcPolicyPublisher implements PolicyPublisher {
         policyKey,
         active,
         transactionHash,
-        explorerUrl: `${ARC_EXPLORER_URL}/tx/${transactionHash}`,
+        explorerUrl: `${ARC_TESTNET.explorerUrl}/tx/${transactionHash}`,
         contractAddress: configuration.contractAddress,
         timestamp: new Date().toISOString(),
       };

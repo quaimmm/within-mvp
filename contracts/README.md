@@ -1,46 +1,35 @@
-# WithinPolicyExecutor
+# Within contracts
 
-Minimal, non-upgradeable Arc Testnet executor for enforcing native-USDC settlement limits.
+Foundry contracts for the Within Arc Testnet hackathon prototype. They are not audited and are not for production financial use.
 
-The contract does not interpret GBP or perform currency conversion. Within evaluates business rules offchain; the contract independently enforces settlement-denominated USDC limits in deterministic 30-day buckets.
+## Inventory and order
 
-## Commands
+1. `WithinPolicyExecutor` — owner-managed active policies and authorised native test-USDC execution.
+2. `WithinMultisigExecutor` — fixed distinct signers, approval threshold, expiry, cancellation and execute-once calls.
+3. `WithinCreditFacility` — 6-decimal ERC-20 test-USDC credit accounting; the multisig is its immutable disbursement executor.
+
+The credit facility must be funded with Arc Testnet ERC-20 USDC before drawdowns can be disbursed.
+
+## Build and test
 
 ```bash
-forge install OpenZeppelin/openzeppelin-contracts@v5.4.0 --no-git
-forge install foundry-rs/forge-std --no-git
 forge fmt --check
-forge test -vv
+forge build --offline
+forge test -vv --offline
 ```
 
-## Deploy
+## Safe deployment preparation
 
-Use a dedicated Arc Testnet wallet funded only with testnet USDC. The configured owner must be the address derived from `PRIVATE_KEY` so the deployment script can configure the initial rule.
+Populate the variables documented in the repository README in your local shell. Simulate first:
 
 ```bash
-export ARC_RPC_URL=https://rpc.testnet.arc.network
-export PRIVATE_KEY=0x...
-export WITHIN_CONTRACT_OWNER=0x...
-export WITHIN_CONTRACT_EXECUTOR=0x...
-
-forge script script/DeployWithinPolicyExecutor.s.sol:DeployWithinPolicyExecutor \
-  --rpc-url "$ARC_RPC_URL" \
-  --broadcast
+forge script script/DeployWithin.s.sol:DeployWithin \
+  --rpc-url "$ARC_TESTNET_RPC_URL" \
+  -vv
 ```
 
-The broadcast output contains the deployment transaction information. Never print, share, or commit `PRIVATE_KEY`.
+Nothing is broadcast unless the human operator explicitly adds `--broadcast` or runs the repository deployment wrapper. Foundry broadcast output is ignored by Git. The committed deployment artifact contains blank values until a real deployment succeeds.
 
-## Verify on ArcScan
+## Verification
 
-```bash
-forge verify-contract <CONTRACT_ADDRESS> \
-  src/WithinPolicyExecutor.sol:WithinPolicyExecutor \
-  --constructor-args $(cast abi-encode "constructor(address,address)" <OWNER> <EXECUTOR>) \
-  --chain-id 5042002 \
-  --verifier blockscout \
-  --verifier-url https://testnet.arcscan.app/api/
-```
-
-Native USDC on Arc uses 18 decimals. Values such as `0.01 ether`, `0.05 ether`, and `1 ether` represent 0.01, 0.05, and 1.00 native USDC respectively on Arc.
-
-This prototype contract has not been professionally audited. Testnet USDC has no real-world value.
+The repository verification script uses chain ID `5042002`, compiler `0.8.24`, Blockscout, and `https://testnet.arcscan.app/api/`. It reconstructs constructor arguments and stops if any deployed address is absent.

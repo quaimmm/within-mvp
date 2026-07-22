@@ -12,11 +12,10 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 import { withinPolicyExecutorAbi } from "@/lib/contracts/within-policy-executor-abi";
+import { ARC_TESTNET } from "@/lib/arc/network";
 import { GENERIC_PAYMENT_FAILURE, PaymentExecutionError } from "./payment-execution-error";
 import type { PaymentProvider, PaymentRequest, PaymentResult } from "./types";
 
-const ARC_EXPLORER_URL = "https://testnet.arcscan.app";
-const DEFAULT_ARC_RPC_URL = "https://rpc.testnet.arc.network";
 const DEFAULT_TEST_SETTLEMENT = "0.01";
 
 type ArcConfiguration = {
@@ -28,7 +27,7 @@ type ArcConfiguration = {
 };
 
 function loadArcConfiguration(): ArcConfiguration {
-  const rpcUrl = process.env.ARC_RPC_URL || DEFAULT_ARC_RPC_URL;
+  const rpcUrl = process.env.ARC_RPC_URL || ARC_TESTNET.rpcUrl;
   const privateKey = process.env.ARC_TREASURY_PRIVATE_KEY;
   const recipientAddress = process.env.ARC_RECIPIENT_ADDRESS;
   const contractAddress = process.env.ARC_POLICY_CONTRACT_ADDRESS;
@@ -106,7 +105,7 @@ export class ArcPaymentProvider implements PaymentProvider {
         settledAmount: Number(configuration.settlementAmount),
         settlementCurrency: "USDC",
         transactionHash,
-        explorerUrl: `${ARC_EXPLORER_URL}/tx/${transactionHash}`,
+        explorerUrl: `${ARC_TESTNET.explorerUrl}/tx/${transactionHash}`,
         contractAddress: configuration.contractAddress,
         policyId: request.policyId,
         executionId,

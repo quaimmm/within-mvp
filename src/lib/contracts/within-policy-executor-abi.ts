@@ -8,6 +8,13 @@ export const withinPolicyExecutorAbi = [
   },
   {
     type: "function",
+    name: "policies",
+    stateMutability: "view",
+    inputs: [{ name: "policyId", type: "bytes32" }],
+    outputs: [{ name: "exists", type: "bool" }, { name: "active", type: "bool" }, { name: "maxPerTransaction", type: "uint256" }, { name: "periodLimit", type: "uint256" }],
+  },
+  {
+    type: "function",
     name: "setPolicy",
     stateMutability: "nonpayable",
     inputs: [

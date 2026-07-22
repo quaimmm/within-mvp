@@ -1,4 +1,4 @@
-import type { PaymentProvider, PaymentRequest, PaymentResult } from "./types";
+import type { PaymentProvider, PaymentRequest, PaymentResult } from "./types.ts";
 
 // Developer demo switch. Keep false for the default successful walkthrough.
 export const SIMULATE_PAYMENT_FAILURE = false;
@@ -19,9 +19,8 @@ export class MockPaymentProvider implements PaymentProvider {
       network: "demo",
       businessAmount: request.amount,
       businessCurrency: request.currency,
-      settledAmount: request.amount,
+      settledAmount: 0.01,
       settlementCurrency: "USDC",
-      transactionHash: "0x7f3a...91c2",
       timestamp: "2026-07-19T10:42:31.000Z",
       isTestnet: true,
     };

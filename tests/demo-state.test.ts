@@ -12,12 +12,23 @@ test("clean demo state restores every seeded starting value", () => {
   assert.equal(state.version, DEMO_STATE_VERSION);
   assert.equal(state.page, "Dashboard");
   assert.equal(state.dashboard.pendingCount, 3);
-  assert.equal(state.dashboard.emilyInQueue, true);
-  assert.equal(state.dashboard.activity[0].status, "Pending");
+  const emily = state.approvals.find((approval) => approval.id === "APR-EMILY-OPENAI");
+  assert.equal(emily?.status, "Pending");
+  assert.equal(emily?.ruleName, "Engineering AI Tools");
+  assert.equal(emily?.category, "AI Software");
+  assert.equal(emily?.policyId, "POL-ENG-AI-001");
+  assert.equal(state.members.length, 6);
+  assert.equal(state.cards.length, 4);
+  assert.equal(state.integrations.length, 5);
+  assert.equal(state.dashboard.activity.find((item) => item.category === "Multisig request created")?.status, "Pending");
   assert.equal(state.dashboard.paymentStatus, "idle");
   assert.equal(state.rules.input, "");
   assert.equal(state.rules.generatedRule, null);
   assert.equal(state.rules.seededRules.find((rule) => rule.policyId === "POL-ENG-AI-001")?.active, true);
+  assert.equal(state.treasury.threshold, 2);
+  assert.equal(state.treasury.signers.length, 3);
+  assert.equal(state.treasury.requests[0].decisions.length, 1);
+  assert.equal(state.treasury.address, null);
 });
 
 test("session state restores completed values and clears incomplete processing", () => {
@@ -25,7 +36,8 @@ test("session state restores completed values and clears incomplete processing",
   completed.dashboard.drawerOpen = true;
   const restored = restoreDemoState(JSON.stringify(completed));
   assert.equal(restored.dashboard.paymentStatus, "completed");
-  assert.equal(restored.dashboard.drawerOpen, true);
+  assert.equal(restored.dashboard.drawerOpen, false);
+  assert.equal(restored.dashboard.selectedApprovalId, null);
   const incomplete = { ...completed, dashboard: { ...completed.dashboard, paymentStatus: "idle", paymentResult: payment } };
   const safe = restoreDemoState(JSON.stringify(incomplete));
   assert.equal(safe.dashboard.paymentStatus, "idle");
@@ -35,6 +47,26 @@ test("session state restores completed values and clears incomplete processing",
 test("malformed and incompatible session versions recover cleanly", () => {
   assert.equal(restoreDemoState("not-json").dashboard.pendingCount, 3);
   assert.equal(restoreDemoState(JSON.stringify({ version: 999 })).version, DEMO_STATE_VERSION);
+  const incomplete = createCleanDemoState() as unknown as { approvals?: unknown };
+  delete incomplete.approvals;
+  assert.equal(restoreDemoState(JSON.stringify(incomplete)).approvals[0].employeeName, "Emily Carter");
+});
+
+test("legacy activity records receive deterministic IDs during hydration", () => {
+  const legacy=createCleanDemoState();
+  const withoutIds=legacy.dashboard.activity.map(item=>{const copy:Partial<typeof item>={...item};delete copy.id;return copy;});
+  const first=restoreDemoState(JSON.stringify({...legacy,dashboard:{...legacy.dashboard,activity:withoutIds}}));
+  const second=restoreDemoState(JSON.stringify({...legacy,dashboard:{...legacy.dashboard,activity:withoutIds}}));
+  assert.ok(first.dashboard.activity.every(item=>item.id));
+  assert.deepEqual(first.dashboard.activity.map(item=>item.id),second.dashboard.activity.map(item=>item.id));
+  assert.equal(new Set(first.dashboard.activity.map(item=>item.id)).size,first.dashboard.activity.length);
+});
+
+test("hydration removes duplicate event records", () => {
+  const state=createCleanDemoState();
+  const repeated=state.dashboard.activity[0];
+  const restored=restoreDemoState(JSON.stringify({...state,dashboard:{...state.dashboard,activity:[repeated,repeated,...state.dashboard.activity.slice(1)]}}));
+  assert.equal(restored.dashboard.activity.filter(item=>item.eventId===repeated.eventId).length,1);
 });
 
 test("reset completely reseeds storage with fresh idempotency values", () => {
@@ -55,10 +87,10 @@ test("payment completion cannot create duplicate activity or counter updates", (
 });
 
 test("health output is safe in local mode and degraded without selected provider secrets", () => {
-  const local = createHealthResponse({ POLICY_GENERATOR: "local", POLICY_PUBLISHER: "mock", PAYMENT_PROVIDER: "mock" });
+  const local = createHealthResponse({ NODE_ENV: "test", POLICY_GENERATOR: "local", POLICY_PUBLISHER: "mock", PAYMENT_PROVIDER: "mock" });
   assert.deepEqual(local.services, { application: "ready", policyGenerator: "local", policyPublisher: "mock", paymentProvider: "mock" });
   assert.equal(local.status, "ok");
-  const missing = createHealthResponse({ POLICY_GENERATOR: "openai", POLICY_PUBLISHER: "arc", PAYMENT_PROVIDER: "arc" });
+  const missing = createHealthResponse({ NODE_ENV: "test", POLICY_GENERATOR: "openai", POLICY_PUBLISHER: "arc", PAYMENT_PROVIDER: "arc" });
   assert.equal(missing.status, "degraded");
   assert.equal(missing.services.policyGenerator, "unavailable");
   assert.equal(JSON.stringify(missing).includes("PRIVATE_KEY"), false);

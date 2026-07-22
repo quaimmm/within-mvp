@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   AnalyticsIcon,
   ApprovalIcon,
@@ -14,20 +15,27 @@ import {
   TeamIcon,
 } from "@/components/icons";
 import { Button } from "@/components/ui/button";
-import { SectionTitle } from "@/components/ui/section-title";
 import { paymentStages, usePaymentExecution } from "@/hooks/use-payment-execution";
-import type { PaymentRequest, PaymentResult } from "@/lib/payments/types";
+import type { PaymentResult } from "@/lib/payments/types";
 import type { PolicyPublishRequest, PolicyPublishResult, SpendingPolicy } from "@/lib/policies/policy-publisher";
-import { completeEmilyPayment, createCleanDemoState, DEMO_STORAGE_KEY, restoreDemoState } from "@/data/demo-state";
-import type { DemoPage, DemoState, TransactionStatus } from "@/data/demo-state";
+import { completeApprovalPayment, createCleanDemoState, DEMO_STORAGE_KEY, restoreDemoState } from "@/data/demo-state";
+import type { DashboardTransaction, DemoApproval, DemoPage, DemoState, TransactionStatus } from "@/data/demo-state";
 import { demoModeEnabled } from "@/lib/demo/demo-mode";
 import { resetDemoState } from "@/lib/demo/reset-demo-state";
+import { BrandLogo } from "@/components/brand-logo";
+import { NetworkStatus } from "@/components/network-status";
+import { MockMultisigProvider } from "@/lib/multisig/mock-multisig-provider";
+import { AnalyticsPage, ApprovalsPage, CardsPage, SettingsPage, TeamPage } from "@/components/product-pages";
+import { AppEntryReveal, WITHIN_APP_INTRO_SEEN_KEY, WITHIN_ENTRY_SOURCE_KEY } from "@/components/app-entry-reveal";
+import { CreditPage } from "@/components/credit-page";
+import { creditAvailable, creditOutstanding } from "@/lib/credit/demo-credit";
 
 const navigation = [
   { label: "Dashboard", icon: OverviewIcon },
   { label: "Cards", icon: CardIcon },
   { label: "Approvals", icon: ApprovalIcon },
   { label: "Rules", icon: RuleIcon },
+  { label: "Credit", icon: CardIcon },
   { label: "Team", icon: TeamIcon },
   { label: "Analytics", icon: AnalyticsIcon },
   { label: "Settings", icon: SettingsIcon },
@@ -37,10 +45,7 @@ type Page = DemoPage;
 
 function Brand() {
   return (
-    <div className="flex h-16 items-center gap-3 px-6">
-      <span className="grid size-7 place-items-center rounded-[9px] bg-ink text-[11px] font-medium tracking-[-0.04em] text-white">W</span>
-      <span className="text-[17px] font-medium tracking-[-0.045em] text-ink">within</span>
-    </div>
+    <div className="flex h-16 items-center px-5"><BrandLogo variant="app" /></div>
   );
 }
 
@@ -70,9 +75,9 @@ function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (page: Page) =>
 
       <div className="mt-auto p-3">
         <button className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border hover:bg-white/55">
-          <span className="grid size-8 place-items-center rounded-full bg-ink text-[10px] font-medium text-white">AC</span>
+          <span className="grid size-8 place-items-center rounded-full bg-ink text-[10px] font-medium text-white">NL</span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-medium text-ink">Acme, Inc.</span>
+            <span className="block truncate text-xs font-medium text-ink">Northstar Labs</span>
             <span className="mt-0.5 block text-[10px] text-muted">Company workspace</span>
           </span>
           <ChevronDownIcon className="size-3.5 text-faint" />
@@ -82,7 +87,7 @@ function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (page: Page) =>
   );
 }
 
-function TopNavigation({ page, onReset }: { page: Page; onReset: () => void }) {
+function TopNavigation({ page, onReset, onNavigate, onSignOut }: { page: Page; onReset: () => void; onNavigate: (page: Page) => void; onSignOut: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
   useEffect(() => {
@@ -94,7 +99,7 @@ function TopNavigation({ page, onReset }: { page: Page; onReset: () => void }) {
   return (
     <header className="fixed left-[224px] right-0 top-0 z-10 flex h-[72px] items-center justify-between border-b border-border bg-canvas/95 px-10">
       <h1 className="text-[13px] font-medium tracking-[-0.02em] text-ink">{page}</h1>
-      <div className="relative"><button aria-label="Open profile" aria-expanded={menuOpen} onClick={() => { setMenuOpen((open) => !open); setConfirmingReset(false); }} className="grid size-8 place-items-center rounded-full bg-[#e7e4dc] text-[10px] font-medium text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/25">MK</button>{demoModeEnabled && menuOpen && <div className="absolute right-0 top-11 w-64 rounded-xl border border-border bg-white p-3 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">{confirmingReset ? <div><p className="text-[11px] leading-5 text-ink">Reset the demo to its starting state?</p><div className="mt-3 flex justify-end gap-2"><Button onClick={() => setConfirmingReset(false)} className="h-8 px-3 text-[10px]">Cancel</Button><Button variant="primary" onClick={() => { onReset(); setMenuOpen(false); setConfirmingReset(false); }} className="h-8 px-3 text-[10px]">Reset</Button></div></div> : <button type="button" onClick={() => setConfirmingReset(true)} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted outline-none transition-colors hover:bg-canvas hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/20">Reset demo</button>}</div>}</div>
+      <div className="relative"><button aria-label="Open profile" aria-expanded={menuOpen} onClick={() => { setMenuOpen((open) => !open); setConfirmingReset(false); }} className="flex items-center gap-3 outline-none"><span className="hidden text-right lg:block"><span className="block text-[10px] text-ink">Amanda Morgan</span><span className="mt-0.5 block text-[9px] text-muted">Administrator</span></span><span className="grid size-8 place-items-center rounded-full bg-[#e7e4dc] text-[10px] font-medium text-ink">AM</span></button>{demoModeEnabled && menuOpen && <div className="absolute right-0 top-11 w-64 rounded-xl border border-border bg-white p-3 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">{confirmingReset ? <div><p className="text-[11px] leading-5 text-ink">Reset the demo to its starting state?</p><div className="mt-3 flex justify-end gap-2"><Button onClick={() => setConfirmingReset(false)} className="h-8 px-3 text-[10px]">Cancel</Button><Button variant="primary" onClick={() => { onReset(); setMenuOpen(false); setConfirmingReset(false); }} className="h-8 px-3 text-[10px]">Reset</Button></div></div> : <div><div className="border-b border-border px-2 pb-3"><p className="text-[11px] text-ink">Amanda Morgan</p><p className="mt-1 text-[9px] text-muted">amanda@northstar.io</p><p className="mt-1 text-[9px] text-muted">Administrator</p></div><button onClick={() => { onNavigate("Settings"); setMenuOpen(false); }} className="mt-2 w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Company settings</button><button type="button" onClick={() => setConfirmingReset(true)} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Reset demo</button><button onClick={onSignOut} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Sign out</button></div>}</div>}</div>
     </header>
   );
 }
@@ -104,21 +109,12 @@ function StatusBadge({ status }: { status: TransactionStatus }) {
     Approved: "text-success before:bg-success",
     Pending: "text-[#8a642b] before:bg-[#b88435]",
     Flagged: "text-[#9a4d45] before:bg-[#b85b51]",
+    Declined: "text-muted before:bg-faint",
   }[status];
   return <span className={`inline-flex items-center gap-1.5 text-[10px] font-medium before:size-1 before:rounded-full ${styles}`}>{status}</span>;
 }
 
 type DecisionState = "idle" | "declining" | "declined";
-
-const emilyPaymentRequest: PaymentRequest = {
-  employeeId: "EMP-ENG-014",
-  employeeName: "Emily Carter",
-  merchant: "OpenAI",
-  category: "AI Software",
-  amount: 29,
-  currency: "GBP",
-  policyId: "POL-ENG-AI-001",
-};
 
 function shortenTransactionHash(hash?: string) {
   if (!hash) return "—";
@@ -126,14 +122,14 @@ function shortenTransactionHash(hash?: string) {
   return `${hash.slice(0, 10)}...${hash.slice(-6)}`;
 }
 
-function PaymentExecutionView({ status, activeStage, result, errorMessage }: { status: "processing" | "completed" | "failed"; activeStage: number; result: PaymentResult | null; errorMessage: string | null }) {
+function PaymentExecutionView({ approval, status, activeStage, result, errorMessage }: { approval: DemoApproval; status: "processing" | "completed" | "failed"; activeStage: number; result: PaymentResult | null; errorMessage: string | null }) {
   if (status === "completed" && result) {
     return (
       <div className="animate-decision-in">
         <div className="pt-12 text-center">
           <span className="mx-auto grid size-11 place-items-center rounded-full bg-success-soft text-success"><CheckIcon className="size-5" /></span>
           <h2 className="mt-6 text-[28px] font-normal tracking-[-0.04em] text-ink">Payment completed</h2>
-          <p className="mt-3 text-[14px] text-muted">£29.00 paid to OpenAI</p>
+          <p className="mt-3 text-[14px] text-muted">£{approval.amount.toFixed(2)} paid to {approval.merchant}</p>
         </div>
 
         <details className="group mt-12 border-y border-border">
@@ -146,7 +142,7 @@ function PaymentExecutionView({ status, activeStage, result, errorMessage }: { s
             <details className="group/tech mt-4">
               <summary className="flex cursor-pointer list-none items-center justify-between py-2 text-[10px] text-muted marker:hidden">Technical details<span className="text-faint transition-transform duration-200 group-open/tech:rotate-45">＋</span></summary>
               <dl className="space-y-3 pt-3 text-[9px]">
-                {(result.provider === "arc" ? [["Provider", "ArcPaymentProvider"], ["Network", "Arc Testnet"], ["Test settlement", `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}`], ["Enforcement", "Onchain spending rule"], ["Contract", shortenTransactionHash(result.contractAddress)], ["Policy", result.policyId || emilyPaymentRequest.policyId], ["Transaction", shortenTransactionHash(result.transactionHash)]] : [["Provider", "MockPaymentProvider"], ["Network", "Demo environment"], ["Transaction reference", result.transactionHash || "—"], ["Policy ID", emilyPaymentRequest.policyId]]).map(([label, value]) => <div key={label} className="flex justify-between gap-5"><dt className="text-faint">{label}</dt><dd className="font-medium text-ink">{value}</dd></div>)}
+                {(result.provider === "arc" ? [["Provider", "ArcPaymentProvider"], ["Network", "Arc Testnet"], ["Test settlement", `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}`], ["Enforcement", "Onchain spending rule"], ["Contract", shortenTransactionHash(result.contractAddress)], ["Policy", result.policyId || approval.policyId], ["Transaction", shortenTransactionHash(result.transactionHash)]] : [["Provider", "MockPaymentProvider"], ["Network", "Demo environment"], ["Evidence", "Demo settlement — no onchain transaction"], ["Policy ID", approval.policyId]]).map(([label, value]) => <div key={label} className="flex justify-between gap-5"><dt className="text-faint">{label}</dt><dd className="font-medium text-ink">{value}</dd></div>)}
                 {result.provider === "arc" && result.explorerUrl && <a href={result.explorerUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-[9px] text-accent hover:underline">View transaction</a>}
               </dl>
             </details>
@@ -162,7 +158,7 @@ function PaymentExecutionView({ status, activeStage, result, errorMessage }: { s
     <div className="animate-decision-in">
       <div className="pt-12 text-center">
         <span role="status" aria-label={status === "failed" ? "Payment failed" : statusText} className="mx-auto block size-5 animate-spin rounded-full border border-accent/15 border-t-accent" />
-        <p className="mt-7 text-[10px] text-muted">Emily Carter · OpenAI · £29.00</p>
+        <p className="mt-7 text-[10px] text-muted">{approval.employeeName} · {approval.merchant} · £{approval.amount.toFixed(2)}</p>
         <h2 className="mt-3 text-[27px] font-normal tracking-[-0.04em] text-ink">{status === "failed" ? "Payment paused" : statusText}</h2>
         <div className="mx-auto mt-7 h-px w-44 overflow-hidden bg-border"><span className="block h-full bg-accent transition-[width] duration-500" style={{ width: `${Math.max(20, ((activeStage + 1) / paymentStages.length) * 100)}%` }} /></div>
       </div>
@@ -181,7 +177,7 @@ function PaymentExecutionView({ status, activeStage, result, errorMessage }: { s
   );
 }
 
-function ApprovalDrawer({ decision, completedPayment, paymentIdempotencyKey, onPaymentComplete, onDecline, onClose }: { decision: DecisionState; completedPayment: PaymentResult | null; paymentIdempotencyKey: string; onPaymentComplete: (result: PaymentResult) => void; onDecline: () => void; onClose: () => void }) {
+function ApprovalDrawer({ approval, decision, completedPayment, paymentIdempotencyKey, onPaymentComplete, onDecline, onClose }: { approval: DemoApproval; decision: DecisionState; completedPayment: PaymentResult | null; paymentIdempotencyKey: string; onPaymentComplete: (result: PaymentResult) => void; onDecline: () => void; onClose: () => void }) {
   const payment = usePaymentExecution();
   const drawerRef = useRef<HTMLElement>(null);
   const working = payment.status === "processing" || decision === "declining";
@@ -194,7 +190,7 @@ function ApprovalDrawer({ decision, completedPayment, paymentIdempotencyKey, onP
   }, [onClose, working]);
 
   async function approveAndExecute() {
-    const result = await payment.execute(emilyPaymentRequest, paymentIdempotencyKey);
+    const result = await payment.execute(approval, paymentIdempotencyKey);
     if (result?.success) onPaymentComplete(result);
   }
 
@@ -212,7 +208,7 @@ function ApprovalDrawer({ decision, completedPayment, paymentIdempotencyKey, onP
               <span className="mx-auto grid size-16 place-items-center rounded-full bg-[#f6e9e7] text-[#9a4d45]"><CloseIcon className="size-6" /></span>
               <p className="mt-7 text-[10px] font-medium uppercase tracking-[0.14em] text-faint">Decision recorded</p>
               <h2 className="mt-3 text-[30px] font-normal tracking-[-0.045em] text-ink">Purchase declined.</h2>
-              <p className="mx-auto mt-3 max-w-xs text-[12px] leading-5 text-muted">Emily’s £29 OpenAI purchase has been stopped and marked for the employee.</p>
+              <p className="mx-auto mt-3 max-w-xs text-[12px] leading-5 text-muted">{approval.employeeName}’s £{approval.amount} {approval.merchant} purchase has been stopped and marked for the employee.</p>
             </div>
           </div>
         ) : (
@@ -223,26 +219,30 @@ function ApprovalDrawer({ decision, completedPayment, paymentIdempotencyKey, onP
             </div>
 
             <div className="flex-1 overflow-y-auto px-8 py-7">
-              {completedPayment ? <PaymentExecutionView status="completed" activeStage={paymentStages.length - 1} result={completedPayment} errorMessage={null} /> : payment.status !== "idle" ? <PaymentExecutionView status={payment.status} activeStage={payment.activeStage} result={payment.result} errorMessage={payment.errorMessage} /> : <>
+              {completedPayment ? <PaymentExecutionView approval={approval} status="completed" activeStage={paymentStages.length - 1} result={completedPayment} errorMessage={null} /> : payment.status !== "idle" ? <PaymentExecutionView approval={approval} status={payment.status} activeStage={payment.activeStage} result={payment.result} errorMessage={payment.errorMessage} /> : <>
               <div className="flex items-start justify-between gap-5 pt-2">
-                <div><p className="text-[11px] text-muted">Emily Carter · Engineering</p><h2 className="mt-2 text-[26px] font-normal tracking-[-0.04em] text-ink">OpenAI</h2></div>
-                <p className="text-[30px] font-normal tracking-[-0.045em] text-ink">£29</p>
+                <div><p className="text-[11px] text-muted">{approval.employeeName} · {approval.department}</p><h2 className="mt-2 text-[26px] font-normal tracking-[-0.04em] text-ink">{approval.merchant}</h2></div>
+                <p className="text-[30px] font-normal tracking-[-0.045em] text-ink">£{approval.amount}</p>
               </div>
 
               <section className="mt-10 border-t border-border pt-6">
                 <div className="flex items-center justify-between"><p className="text-[10px] text-muted">Rule result</p><span className="flex items-center gap-1.5 text-[10px] font-medium text-success"><i className="size-1 rounded-full bg-success" />Within rule</span></div>
-                <p className="mt-4 text-[14px] leading-6 text-ink">Engineering can spend up to £300 per month on AI software.</p>
-                <p className="mt-2 text-[10px] text-muted">No approval normally required</p>
+                <p className="mt-4 text-[11px] font-medium text-ink">{approval.ruleName}</p>
+                <p className="mt-1 text-[9px] text-muted">{approval.category} · {approval.policyId}</p>
+                <p className="mt-4 text-[14px] leading-6 text-ink">{approval.ruleDescription}</p>
+                <p className="mt-2 text-[10px] text-muted">{approval.approvalNote}</p>
               </section>
+
+              {(approval.businessReason || approval.settlementAmount) && <section className="mt-8 border-t border-border pt-6"><p className="text-[10px] text-muted">Request details</p><dl className="mt-4 space-y-3 text-[11px]"><div className="flex justify-between gap-6"><dt className="text-muted">Business reason</dt><dd className="text-right">{approval.businessReason || "Not provided"}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Settlement amount</dt><dd>{approval.settlementAmount ? `${approval.settlementAmount} ${approval.settlementAsset}` : "Determined after approval"}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Approval type</dt><dd>{approval.approvalType}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Risk</dt><dd>{approval.risk}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Arc network</dt><dd>Demo settlement</dd></div></dl></section>}
 
               <section className="mt-8 border-t border-border pt-6">
                 <p className="text-[10px] text-muted">Why review it?</p>
-                <p className="mt-3 text-[13px] leading-6 text-ink">First purchase from this merchant.</p>
+                <p className="mt-3 text-[13px] leading-6 text-ink">{approval.reviewReason}</p>
               </section>
 
               <section className="mt-8 border-t border-border pt-6">
                 <p className="text-[10px] text-accent">Recommendation</p>
-                <p className="mt-3 text-[13px] leading-6 text-[#4e5260]">This purchase matches the company rule and Emily’s usual spending. Low risk.</p>
+                <p className="mt-3 text-[13px] leading-6 text-[#4e5260]">{approval.recommendation}</p>
               </section>
               </>}
             </div>
@@ -258,38 +258,22 @@ function ApprovalDrawer({ decision, completedPayment, paymentIdempotencyKey, onP
   );
 }
 
-function Dashboard({ demoState, setDemoState }: { demoState: DemoState; setDemoState: React.Dispatch<React.SetStateAction<DemoState>> }) {
-  const [decision, setDecision] = useState<DecisionState>("idle");
-  const [toast, setToast] = useState<"approved" | "declined" | null>(null);
+function MultisigApprovalDrawer({ approval, state, setState, onClose }: { approval: DemoApproval; state: DemoState; setState: React.Dispatch<React.SetStateAction<DemoState>>; onClose: () => void }) {
+  const [working,setWorking]=useState(false); const [message,setMessage]=useState<string|null>(null); const request=state.treasury.requests.find((item)=>item.id===approval.multisigRequestId); const signer=state.treasury.signers.find((item)=>item.id===state.treasury.currentSignerId); const provider=new MockMultisigProvider();
+  if(!request||!signer)return null; const approvals=request.decisions.filter((decision)=>decision.decision==="Approved").length;
+  const event=(category:string,eventId:string,employee=signer.name):DashboardTransaction=>({id:`activity-${eventId}`,eventId,initials:employee.split(" ").map((part)=>part[0]).join(""),employee,role:signer.role,merchant:approval.merchant,category,amount:`£${approval.amount.toLocaleString("en-GB",{minimumFractionDigits:2})}`,status:"Approved"});
+  const addUnique=(activity:DashboardTransaction[],item:DashboardTransaction)=>activity.some((entry)=>entry.eventId===item.eventId)?activity:[item,...activity];
+  const approve=async()=>{if(working)return;setWorking(true);setMessage(null);try{const next=await provider.approve(request,signer.id);const reached=next.status==="Ready to settle";setState((current)=>({...current,treasury:{...current.treasury,requests:current.treasury.requests.map((item)=>item.id===request.id?next:item)},approvals:current.approvals.map(item=>item.id===approval.id?{...item,requestStatus:reached?"Ready to settle":item.requestStatus}:item),dashboard:{...current.dashboard,activity:addUnique(current.dashboard.activity,event(reached?"Threshold reached · 2 of 2":"Signer approved",`${request.id}:approval:${signer.id}`))}}));}catch(error){setMessage(error instanceof Error?error.message:"Approval failed.");}finally{setWorking(false);}};
+  const settle=async()=>{if(working)return;setWorking(true);setMessage(null);try{const next=await provider.settle(request);setState((current)=>{const submitted=addUnique(current.dashboard.activity,event("Settlement submitted",`${request.id}:settlement-submitted`));const confirmed=addUnique(submitted,event("Settlement confirmed",`${request.id}:settlement-confirmed`));return {...current,treasury:{...current.treasury,requests:current.treasury.requests.map((item)=>item.id===request.id?next:item)},approvals:current.approvals.map((item)=>item.id===approval.id?{...item,status:"Approved",requestStatus:"Completed"}:item),dashboard:{...current.dashboard,pendingCount:Math.max(0,current.dashboard.pendingCount-1),companySpend:current.dashboard.companySpend+approval.amount,budgetRemaining:Math.max(0,current.dashboard.budgetRemaining-approval.amount),activity:confirmed}};});setMessage("Demo settlement confirmed.");}catch(error){setMessage(error instanceof Error?error.message:"Settlement failed.");}finally{setWorking(false);}};
+  const decline=()=>setState((current)=>({...current,treasury:{...current.treasury,requests:current.treasury.requests.map((item)=>item.id===request.id?{...item,status:"Declined"}:item)},approvals:current.approvals.map((item)=>item.id===approval.id?{...item,status:"Declined",requestStatus:"Declined"}:item),dashboard:{...current.dashboard,pendingCount:Math.max(0,current.dashboard.pendingCount-1)}}));
+  return <><button aria-label="Close approval drawer" onClick={onClose} className="fixed inset-y-0 left-[224px] right-0 top-[72px] z-30 bg-ink/10"/><aside aria-label="Treasury multisig approval" className="fixed bottom-0 right-0 top-[72px] z-40 flex w-[520px] flex-col border-l border-border bg-white shadow-[-24px_0_70px_rgba(23,24,21,.1)]"><div className="flex items-center justify-between border-b border-border px-8 py-5"><p className="text-[11px]">Treasury multisig</p><button aria-label="Close drawer" onClick={onClose} disabled={working} className="text-muted">×</button></div><div className="flex-1 overflow-y-auto px-8 py-8"><div className="flex justify-between"><div><p className="text-[11px] text-muted">{approval.employeeName} · {approval.department}</p><h2 className="mt-2 text-[27px] tracking-[-.04em]">{approval.merchant}</h2></div><p className="text-[30px] tracking-[-.04em]">£{approval.amount.toLocaleString("en-GB")}</p></div><section className="mt-9 border-t border-border pt-6"><p className="text-[10px] text-muted">Matched rule</p><p className="mt-3 text-[12px]">{approval.ruleName}</p><p className="mt-2 text-[10px] text-muted">{approval.policyId}</p><button onClick={()=>setState((current)=>({...current,page:"Rules",dashboard:{...current.dashboard,drawerOpen:false,selectedApprovalId:null}}))} className="mt-3 text-[10px] text-accent">View policy</button></section><section className="mt-7 border-t border-border pt-6"><p className="text-[10px] text-muted">Why multisig?</p><p className="mt-3 text-[12px] leading-5">{approval.reviewReason}</p></section><section className="mt-7 border-t border-border pt-6"><div className="flex justify-between"><p className="text-[10px] text-muted">Signer progress</p><p className="text-[10px] text-accent">{approvals} of {request.required} approvals</p></div><div className="mt-5 divide-y divide-border border-y border-border">{state.treasury.signers.map((item)=>{const decision=request.decisions.find((entry)=>entry.signerId===item.id);return <div key={item.id} className="flex justify-between py-3 text-[10px]"><span>{item.name}<span className="ml-2 text-faint">{item.role}</span></span><span className={decision?"text-success":"text-muted"}>{decision?.decision??"Awaiting"}</span></div>})}</div></section><section className="mt-7 border-t border-border pt-6"><NetworkStatus address={state.wallet.address} chainId={state.wallet.chainId} mock/><p className="mt-3 text-[10px] text-muted">Status: {request.status}</p><p className="mt-2 text-[9px] text-faint">Expires {new Date(request.expiresAt).toLocaleDateString("en-GB")}</p></section>{message&&<p role="status" className="mt-5 text-[10px] text-muted">{message}</p>}<details className="mt-7 border-t border-border pt-5 text-[10px] text-muted"><summary>View settlement details</summary><p className="mt-3">Demo settlement. No transaction hash or explorer link is created in mock mode.</p></details></div><div className="border-t border-border p-6"><p className="mb-4 text-[9px] text-muted">Acting as {signer.name} · Demo identity simulation</p><div className="grid grid-cols-2 gap-3">{request.status==="Ready to settle"?<Button variant="primary" disabled={working} onClick={settle} className="col-span-2 h-11">{working?"Settling…":"Execute demo settlement"}</Button>:request.status==="Settlement confirmed"?<Button onClick={onClose} className="col-span-2 h-11">Close</Button>:<><Button disabled={working||request.status!=="Awaiting signatures"} onClick={decline}>Decline</Button><Button variant="primary" disabled={working||request.status!=="Awaiting signatures"} onClick={approve}>{working?"Approving…":"Approve as current signer"}</Button></>}</div></div></aside></>;
+}
+
+function Dashboard({ demoState, onOpenApproval }: { demoState: DemoState; onOpenApproval: (id: string) => void }) {
   const approvalTriggerRef = useRef<HTMLButtonElement>(null);
   const { dashboard } = demoState;
-
-  function closeDrawer() {
-    setDemoState((state) => ({ ...state, dashboard: { ...state.dashboard, drawerOpen: false } }));
-    window.setTimeout(() => approvalTriggerRef.current?.focus(), 0);
-  }
-
-  function completePayment(result: PaymentResult) {
-    if (!result.success) return;
-    setDemoState((state) => completeEmilyPayment(state, result));
-    setToast("approved");
-    window.setTimeout(() => setToast(null), 3800);
-  }
-
-  function declineApproval() {
-    if (decision !== "idle") return;
-    setDecision("declining");
-    window.setTimeout(() => {
-      setDecision("declined");
-      setDemoState((state) => state.dashboard.emilyInQueue ? ({ ...state, dashboard: { ...state.dashboard, pendingCount: Math.max(0, state.dashboard.pendingCount - 1), emilyInQueue: false, activity: state.dashboard.activity.map((item) => item.employee === "Emily Carter" ? { ...item, status: "Flagged" } : item) } }) : state);
-      setToast("declined");
-      window.setTimeout(() => {
-        closeDrawer();
-        setDecision("idle");
-      }, 900);
-      window.setTimeout(() => setToast(null), 3800);
-    }, 650);
-  }
+  const awaitingTreasury = demoState.treasury.requests.filter((request) => request.status === "Awaiting signatures").length;
+  const readyTreasury = demoState.treasury.requests.filter((request) => request.status === "Ready to settle").length;
 
   return (
     <div className="mx-auto max-w-[1120px]">
@@ -303,6 +287,8 @@ function Dashboard({ demoState, setDemoState }: { demoState: DemoState; setDemoS
           <div className="px-8"><p className="text-[10px] text-muted">Pending approvals</p><p className="mt-2 text-[20px] font-normal tracking-[-0.03em] text-ink transition-all duration-200">{dashboard.pendingCount}</p></div>
           <div className="pl-8"><p className="text-[10px] text-muted">Active rules</p><p className="mt-2 text-[20px] font-normal tracking-[-0.03em] text-ink">{dashboard.activeRuleCount}</p></div>
         </div>
+        {(awaitingTreasury > 0 || readyTreasury > 0) && <button type="button" onClick={() => onOpenApproval("APR-DANIEL-BA")} className="mt-8 flex items-center gap-3 text-left text-[10px] text-muted transition-colors hover:text-ink"><span className="size-1.5 rounded-full bg-[#b88435]"/><span>Treasury approvals</span><span className="text-ink">{readyTreasury > 0 ? `${readyTreasury} ready to settle` : `${awaitingTreasury} awaiting signature`}</span><span aria-hidden="true">›</span></button>}
+        <div className="mt-8 flex max-w-2xl items-center justify-between border-t border-border pt-5 text-[10px]"><span className="text-ink">Company Credit</span><span className="text-muted">{creditAvailable(demoState.credit).toLocaleString("en-GB")} USDC available</span><span className="text-muted">{creditOutstanding(demoState.credit).toLocaleString("en-GB")} USDC outstanding</span><span className="text-muted">{demoState.credit.requests.filter((request)=>request.status==="Awaiting finance approval").length} pending drawdown</span></div>
       </section>
 
       <section className="mt-20 border-t border-border pt-8">
@@ -322,7 +308,7 @@ function Dashboard({ demoState, setDemoState }: { demoState: DemoState; setDemoS
           <div><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Recent activity</h3><p className="mt-2 text-[11px] text-muted">Latest company purchases</p></div>
           <div className="mt-6 divide-y divide-border">
             {dashboard.activity.slice(0, 5).map((transaction) => (
-              <div key={`${transaction.employee}-${transaction.merchant}`} className="grid grid-cols-[1fr_120px_90px] items-center gap-5 py-4">
+              <div key={transaction.id} className="grid grid-cols-[1fr_120px_90px] items-center gap-5 py-4">
                 <div className="min-w-0"><p className="truncate text-[12px] font-medium text-ink">{transaction.merchant}</p><p className="mt-1 text-[10px] text-muted">{transaction.employee} · {transaction.category}</p></div>
                 <p className="text-right text-[11px] font-medium tabular-nums text-ink">{transaction.amount}</p>
                 <div className="text-right"><StatusBadge status={transaction.status} /></div>
@@ -334,28 +320,15 @@ function Dashboard({ demoState, setDemoState }: { demoState: DemoState; setDemoS
         <section className="border-l border-border pl-10">
           <div><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Needs review</h3><p className="mt-2 text-[11px] text-muted">{dashboard.pendingCount} pending approvals</p></div>
           <div className="mt-6 divide-y divide-border">
-            {[
-              ...(dashboard.emilyInQueue ? [{ name: "Emily Carter", merchant: "OpenAI · First purchase", amount: "£29", review: true }] : []),
-              { name: "Amelia Price", merchant: "The Hoxton", amount: "£846", review: false },
-              { name: "Eva Romero", merchant: "Eurostar", amount: "£412", review: false },
-            ].map((item) => item.review ? (
-              <button ref={approvalTriggerRef} data-testid="emily-approval" onClick={() => setDemoState((state) => ({ ...state, dashboard: { ...state.dashboard, drawerOpen: true } }))} key={item.name} className="group flex w-full items-center gap-3 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/20">
-                <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium text-ink">{item.name}</p><p className="mt-1 truncate text-[9px] text-muted">{item.merchant}</p></div>
-                <span className="text-[11px] font-medium text-ink">{item.amount}</span><span className="text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-accent">›</span>
+            {demoState.approvals.filter((item) => item.status === "Pending" || item.status === "Flagged").map((item, index) => (
+              <button ref={index === 0 ? approvalTriggerRef : undefined} data-testid={item.id === "APR-EMILY-OPENAI" ? "emily-approval" : undefined} onClick={() => onOpenApproval(item.id)} key={item.id} className="group flex w-full items-center gap-3 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/20">
+                <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium text-ink">{item.employeeName}</p><p className="mt-1 truncate text-[9px] text-muted">{item.merchant} · {item.category}</p></div>
+                <span className="text-[11px] font-medium text-ink">£{item.amount}</span><span className="text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-accent">›</span>
               </button>
-            ) : (
-              <div key={item.name} className="flex items-center gap-3 py-4"><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium text-ink">{item.name}</p><p className="mt-1 truncate text-[9px] text-muted">{item.merchant}</p></div><span className="text-[11px] font-medium text-ink">{item.amount}</span></div>
             ))}
           </div>
         </section>
       </div>
-      {dashboard.drawerOpen && <ApprovalDrawer decision={decision} completedPayment={dashboard.paymentResult} paymentIdempotencyKey={`APR-EMILY-OPENAI-${demoState.idempotency.payment}`} onPaymentComplete={completePayment} onDecline={declineApproval} onClose={() => { if (decision === "idle") closeDrawer(); }} />}
-      {toast && (
-        <div role="status" className="fixed bottom-6 right-6 z-50 flex min-w-[320px] items-center gap-3 rounded-[14px] border border-border bg-ink px-4 py-3.5 text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)] animate-toast-in">
-          <span className={`grid size-7 place-items-center rounded-full ${toast === "approved" ? "bg-[#356f56]" : "bg-[#925149]"}`}>{toast === "approved" ? <CheckIcon className="size-3.5" /> : <CloseIcon className="size-3" />}</span>
-          <div><p className="text-[11px] font-medium">Purchase {toast}</p><p className="mt-0.5 text-[9px] text-white/55">Emily Carter · OpenAI · £29</p></div>
-        </div>
-      )}
       <div className="h-16" />
     </div>
   );
@@ -479,7 +452,7 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
         </div>
 
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
-          {policySuggestions.map((suggestion) => <span key={suggestion} className="text-[10px] text-muted transition-colors duration-200 hover:text-ink">{suggestion}</span>)}
+          {policySuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => setDescription(suggestion)} className="text-[10px] text-muted outline-none transition-colors duration-200 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/20">{suggestion}</button>)}
         </div>
         <Button onClick={generateRule} aria-label={generationLoading ? "Creating rule" : "Generate rule"} disabled={generationLoading} variant="primary" className="mt-7 h-11 px-6">{generationLoading ? "Creating rule…" : "Generate rule"}</Button>
         {generationMessage && <div aria-live="polite" className={`mt-4 text-[10px] leading-5 ${generationState === "error" ? "text-[#9a4d45]" : "text-muted"}`}>{generationMessage.split("\n").map((line) => <p key={line}>{line}</p>)}</div>}
@@ -498,14 +471,14 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
 
         <details className="group border-b border-border">
           <summary className="flex cursor-pointer list-none items-center justify-between py-5 text-[11px] text-muted marker:hidden">More options<span className="text-faint transition-transform duration-200 group-open:rotate-45">＋</span></summary>
-          <dl className="grid grid-cols-2 gap-x-12 gap-y-5 border-t border-border py-6 text-[10px]"><div><dt className="text-faint">Description</dt><dd><textarea aria-label="Rule description" value={rule.description} onChange={(event) => updateRule("description", event.target.value)} rows={2} className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Limit cadence</dt><dd><select aria-label="Limit cadence" value={rule.limitType} onChange={(event) => updateRule("limitType", event.target.value as SpendingPolicy["limitType"])} className={fieldClass}><option value="monthly">Monthly</option><option value="per_transaction">Per transaction</option></select></dd></div><div><dt className="text-faint">Approval threshold</dt><dd><input aria-label="Approval threshold" type="number" disabled={!rule.approvalRequired} value={rule.approvalThreshold ?? ""} onChange={(event) => updateRule("approvalThreshold", Number(event.target.value))} className={`${fieldClass} disabled:opacity-40`} /></dd></div><div><dt className="text-faint">Recurring purchases</dt><dd><select aria-label="Recurring purchases" value={rule.recurringAllowed ? "allowed" : "not_allowed"} onChange={(event) => updateRule("recurringAllowed", event.target.value === "allowed")} className={fieldClass}><option value="allowed">Allowed</option><option value="not_allowed">Not allowed</option></select></dd></div><div><dt className="text-faint">Merchants</dt><dd><input aria-label="Merchant restrictions" value={rule.merchantRestrictions} onChange={(event) => updateRule("merchantRestrictions", event.target.value)} className={fieldClass} /></dd></div><div><dt className="text-faint">Time restrictions</dt><dd><input aria-label="Time restrictions" value={rule.timeRestrictions ?? ""} placeholder="None" onChange={(event) => updateRule("timeRestrictions", event.target.value || null)} className={fieldClass} /></dd></div><div><dt className="text-faint">Confidence</dt><dd><select aria-label="Confidence" value={rule.confidence} onChange={(event) => updateRule("confidence", event.target.value as SpendingPolicy["confidence"])} className={fieldClass}><option>High</option><option>Medium</option><option>Low</option></select></dd></div><div><dt className="text-faint">Currency</dt><dd><select aria-label="Currency" value={rule.businessCurrency} className={fieldClass}><option>GBP</option></select></dd></div><div className="col-span-2"><dt className="text-faint">Assumptions</dt><dd><textarea aria-label="Assumptions" value={rule.assumptions.join("\n")} onChange={(event) => updateRule("assumptions", event.target.value.split("\n").slice(0, 5))} rows={Math.max(2, rule.assumptions.length)} placeholder="None" className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Rule ID</dt><dd className="mt-1.5 text-ink">{rule.policyId}</dd></div>{rule.settlementGuard && <><div><dt className="text-faint">Enforcement</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.enforcement === "onchain" ? "Onchain spending rule" : "Demo environment"}</dd></div>{rule.settlementGuard.enforcement === "onchain" && <><div><dt className="text-faint">Settlement guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.maxPerTransactionUSDC} USDC per payment</dd></div><div><dt className="text-faint">Period guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.periodLimitUSDC} USDC per 30-day period</dd></div><div><dt className="text-faint">Contract</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.contractAddress)}</dd></div><div><dt className="text-faint">Transaction</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.transactionHash)}</dd></div>{rule.settlementGuard.explorerUrl && <div><a href={rule.settlementGuard.explorerUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">View transaction</a></div>}</>}</>}</dl>
+          <dl className="grid grid-cols-2 gap-x-12 gap-y-5 border-t border-border py-6 text-[10px]"><div><dt className="text-faint">Description</dt><dd><textarea aria-label="Rule description" value={rule.description} onChange={(event) => updateRule("description", event.target.value)} rows={2} className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Limit cadence</dt><dd><select aria-label="Limit cadence" value={rule.limitType} onChange={(event) => updateRule("limitType", event.target.value as SpendingPolicy["limitType"])} className={fieldClass}><option value="monthly">Monthly</option><option value="per_transaction">Per transaction</option></select></dd></div><div><dt className="text-faint">Approval threshold</dt><dd><input aria-label="Approval threshold" type="number" disabled={!rule.approvalRequired} value={rule.approvalThreshold ?? ""} onChange={(event) => updateRule("approvalThreshold", Number(event.target.value))} className={`${fieldClass} disabled:opacity-40`} /></dd></div><div><dt className="text-faint">Recurring purchases</dt><dd><select aria-label="Recurring purchases" value={rule.recurringAllowed ? "allowed" : "not_allowed"} onChange={(event) => updateRule("recurringAllowed", event.target.value === "allowed")} className={fieldClass}><option value="allowed">Allowed</option><option value="not_allowed">Not allowed</option></select></dd></div><div><dt className="text-faint">Merchants</dt><dd><input aria-label="Merchant restrictions" value={rule.merchantRestrictions} onChange={(event) => updateRule("merchantRestrictions", event.target.value)} className={fieldClass} /></dd></div><div><dt className="text-faint">Time restrictions</dt><dd><input aria-label="Time restrictions" value={rule.timeRestrictions ?? ""} placeholder="None" onChange={(event) => updateRule("timeRestrictions", event.target.value || null)} className={fieldClass} /></dd></div><div><dt className="text-faint">Confidence</dt><dd><select aria-label="Confidence" value={rule.confidence} onChange={(event) => updateRule("confidence", event.target.value as SpendingPolicy["confidence"])} className={fieldClass}><option>High</option><option>Medium</option><option>Low</option></select></dd></div><div><dt className="text-faint">Currency</dt><dd><select aria-label="Currency" value={rule.businessCurrency} onChange={() => undefined} className={fieldClass}><option>GBP</option></select></dd></div><div className="col-span-2"><dt className="text-faint">Assumptions</dt><dd><textarea aria-label="Assumptions" value={rule.assumptions.join("\n")} onChange={(event) => updateRule("assumptions", event.target.value.split("\n").slice(0, 5))} rows={Math.max(2, rule.assumptions.length)} placeholder="None" className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Rule ID</dt><dd className="mt-1.5 text-ink">{rule.policyId}</dd></div>{rule.settlementGuard && <><div><dt className="text-faint">Enforcement</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.enforcement === "onchain" ? "Onchain spending rule" : "Demo environment"}</dd></div>{rule.settlementGuard.enforcement === "onchain" && <><div><dt className="text-faint">Settlement guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.maxPerTransactionUSDC} USDC per payment</dd></div><div><dt className="text-faint">Period guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.periodLimitUSDC} USDC per 30-day period</dd></div><div><dt className="text-faint">Contract</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.contractAddress)}</dd></div><div><dt className="text-faint">Transaction</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.transactionHash)}</dd></div>{rule.settlementGuard.explorerUrl && <div><a href={rule.settlementGuard.explorerUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">View transaction</a></div>}</>}</>}</dl>
         </details>
 
         <div className="mt-8 flex items-start justify-between gap-8"><div aria-live="polite">{rule.active && <p className="text-[11px] text-success">Rule active</p>}{ruleError && ruleError.split("\n").map((line) => <p key={line} className="text-[10px] leading-5 text-[#9a4d45]">{line}</p>)}</div>{!rule.active && <Button onClick={activateRule} disabled={Boolean(operation)} variant="primary" className="h-11 px-6">{operation === "publish" ? "Activating rule…" : "Activate rule"}</Button>}</div>
       </section>}
 
       <section className="mt-24 border-t border-border pt-10">
-        <div><h3 className="text-[24px] font-normal tracking-[-0.04em] text-ink">Active rules</h3><p className="mt-2 text-[11px] text-muted">12 rules guide company spending.</p></div>
+        <div><h3 className="text-[24px] font-normal tracking-[-0.04em] text-ink">Active rules</h3><p className="mt-2 text-[11px] text-muted">{demoState.dashboard.activeRuleCount} rules guide company spending.</p></div>
         <div className="mt-7 divide-y divide-border border-y border-border">
           {rule?.settlementGuard && <details className="group"><summary className="grid cursor-pointer list-none grid-cols-[190px_1fr_auto] items-center gap-8 py-5 marker:hidden"><span className="text-[12px] font-medium text-ink">{rule.name}</span><span className="text-[11px] text-muted">{rule.description}</span><span className={`flex items-center gap-2 text-[10px] ${rule.active ? "text-success" : "text-muted"}`}><i className={`size-1 rounded-full ${rule.active ? "bg-success" : "bg-faint"}`} />{rule.active ? "Rule active" : "Rule paused"}</span></summary><div className="pb-5 pl-[222px] text-[10px] text-muted"><button type="button" disabled={Boolean(operation)} onClick={() => changeRuleStatus(!rule.active)} className="transition-colors hover:text-ink disabled:opacity-50">{operation === "status" ? "Updating rule…" : rule.active ? "Pause rule" : "Reactivate rule"}</button></div></details>}
           {demoState.rules.seededRules.map((seededRule) => <details key={seededRule.policyId} className="group"><summary className="grid cursor-pointer list-none grid-cols-[190px_1fr_auto] items-center gap-8 py-5 marker:hidden"><span className="text-[12px] font-medium text-ink">{seededRule.name}</span><span className="text-[11px] text-muted">{seededRule.description}</span><span className={`flex items-center gap-2 text-[10px] ${seededRule.active ? "text-success" : "text-muted"}`}><i className={`size-1 rounded-full ${seededRule.active ? "bg-success" : "bg-faint"}`} />{seededRule.active ? "Rule active" : "Rule paused"}</span></summary><div className="pb-5 pl-[222px] text-[10px] text-muted">View history · Edit details</div></details>)}
@@ -516,39 +489,33 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
   );
 }
 
-function PlaceholderPage({ page }: { page: Exclude<Page, "Dashboard"> }) {
-  return (
-    <div className="mx-auto max-w-[1120px]">
-      <SectionTitle title={page} description={`A calm, focused home for ${page.toLowerCase()}.`} />
-      <div className="mt-16 border-t border-border pt-8"><p className="text-[11px] text-muted">This area is ready for the next product flow.</p></div>
-    </div>
-  );
-}
-
-type HealthServices = { policyGenerator: "local" | "configured" | "unavailable"; policyPublisher: "mock" | "configured" | "unavailable"; paymentProvider: "mock" | "configured" | "unavailable" };
-
-function SettingsPage() {
-  const [services, setServices] = useState<HealthServices | null>(null);
-  useEffect(() => { fetch("/api/health").then((response) => response.json()).then((result) => setServices(result.services)).catch(() => setServices(null)); }, []);
-  const generator = services?.policyGenerator === "configured" ? "AI-powered" : "Local demo engine";
-  const enforcement = services?.policyPublisher === "configured" ? "Arc Testnet" : "Demo environment";
-  const payments = services?.paymentProvider === "configured" ? "Arc Testnet" : "Demo environment";
-  return <div className="mx-auto max-w-[1120px]"><SectionTitle title="Settings" description="Workspace preferences and environment." /><section className="mt-16 max-w-xl border-t border-border pt-8"><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Demo environment</h3><dl className="mt-6 divide-y divide-border border-y border-border text-[11px]"><div className="flex justify-between py-4"><dt className="text-muted">Rule creation</dt><dd className="text-ink">{generator}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Rule enforcement</dt><dd className="text-ink">{enforcement}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Payments</dt><dd className="text-ink">{payments}</dd></div></dl></section></div>;
-}
-
 export default function WithinApp() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [demoState, setDemoStateInternal] = useState<DemoState>(() => createCleanDemoState());
   const [hydrated, setHydrated] = useState(false);
+  const [introMode, setIntroMode] = useState<"loading" | "full" | "direct" | "ready">("loading");
   const [resetToast, setResetToast] = useState(false);
+  const [decision, setDecision] = useState<DecisionState>("idle");
+  const [decisionToast, setDecisionToast] = useState<"approved" | "declined" | null>(null);
   const page = demoState.page;
 
   useEffect(() => {
     const restoration = window.setTimeout(() => {
-      if (demoModeEnabled) setDemoStateInternal(restoreDemoState(sessionStorage.getItem(DEMO_STORAGE_KEY)));
+      const restored = demoModeEnabled ? restoreDemoState(sessionStorage.getItem(DEMO_STORAGE_KEY)) : createCleanDemoState();
+      if (pathname === "/app/credit") restored.page = "Credit";
+      setDemoStateInternal(restored);
+      if (restored.signedIn) {
+        if (sessionStorage.getItem(WITHIN_ENTRY_SOURCE_KEY) === "connect") {
+          setIntroMode("full");
+        } else setIntroMode("direct");
+      }
       setHydrated(true);
     }, 0);
     return () => window.clearTimeout(restoration);
-  }, []);
+  }, [pathname]);
+
+  useEffect(() => { if (hydrated && !demoState.signedIn) router.replace("/connect"); }, [demoState.signedIn, hydrated, router]);
 
   useEffect(() => {
     if (demoModeEnabled && hydrated) sessionStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoState));
@@ -572,22 +539,42 @@ export default function WithinApp() {
 
   function setPage(nextPage: Page) {
     setDemoState((state) => ({ ...state, page: nextPage }));
+    if (nextPage === "Credit" && pathname !== "/app/credit") router.push("/app/credit");
+    if (nextPage !== "Credit" && pathname === "/app/credit") router.push("/app");
   }
 
   function resetDemo() {
-    setDemoStateInternal(resetDemoState(sessionStorage));
+    const next = resetDemoState(sessionStorage);
+    next.signedIn = true;
+    sessionStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(next));
+    sessionStorage.removeItem(WITHIN_APP_INTRO_SEEN_KEY);
+    sessionStorage.removeItem(WITHIN_ENTRY_SOURCE_KEY);
+    setDemoStateInternal(next);
     setResetToast(true);
     window.setTimeout(() => setResetToast(false), 2600);
   }
 
+  function openApproval(id: string) { setDecision("idle"); setDemoState((state) => ({ ...state, dashboard: { ...state.dashboard, drawerOpen: true, selectedApprovalId: id, paymentStatus: "idle", paymentResult: null } })); }
+  function closeApproval() { setDemoState((state) => ({ ...state, dashboard: { ...state.dashboard, drawerOpen: false, selectedApprovalId: null } })); }
+  function completePayment(result: PaymentResult) { const id = demoState.dashboard.selectedApprovalId; if (!id || !result.success) return; setDemoState((state) => completeApprovalPayment(state, id, result)); setDecisionToast("approved"); window.setTimeout(() => setDecisionToast(null), 3000); }
+  function declineApproval() { const id = demoState.dashboard.selectedApprovalId; if (!id || decision !== "idle") return; setDecision("declining"); window.setTimeout(() => { setDemoState((state) => { const approval = state.approvals.find((item) => item.id === id); if (!approval || approval.status === "Declined") return state; return { ...state, approvals: state.approvals.map((item) => item.id === id ? { ...item, status: "Declined" } : item), dashboard: { ...state.dashboard, pendingCount: Math.max(0, state.dashboard.pendingCount - 1), activity: state.dashboard.activity.map((item) => item.employee === approval.employeeName && item.merchant === approval.merchant ? { ...item, status: "Declined" } : item) } }; }); setDecision("declined"); setDecisionToast("declined"); window.setTimeout(() => { closeApproval(); setDecision("idle"); }, 900); }, 500); }
+
+  if (!hydrated || !demoState.signedIn) return <div className="min-h-screen bg-canvas" />;
+
+  const selectedApproval = demoState.approvals.find((item) => item.id === demoState.dashboard.selectedApprovalId) ?? null;
+
   return (
-    <div className="min-h-screen bg-canvas text-ink">
+    <div className={`min-h-screen min-w-[1024px] bg-canvas text-ink ${introMode !== "ready" ? `app-entry app-entry-${introMode}` : ""}`}>
       <Sidebar page={page} onNavigate={setPage} />
-      <TopNavigation page={page} onReset={resetDemo} />
+      <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>
+      <TopNavigation page={page} onReset={resetDemo} onNavigate={setPage} onSignOut={() => setDemoState((state) => ({ ...state, signedIn: false }))} />
       <main className="ml-[224px] min-h-screen pt-[72px]">
-        <div className="px-10 py-14">{page === "Dashboard" ? <Dashboard key={demoState.idempotency.payment} demoState={demoState} setDemoState={setDemoState} /> : page === "Rules" ? <RulesPage key={demoState.idempotency.publish} demoState={demoState} setDemoState={setDemoState} /> : page === "Settings" ? <SettingsPage /> : <PlaceholderPage page={page} />}</div>
+        <div className="px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={demoState.idempotency.publish} demoState={demoState} setDemoState={setDemoState} /> : page === "Credit" ? <CreditPage state={demoState} setState={setDemoState} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => setDemoState((state) => ({ ...state, signedIn: false }))} />}</div>
       </main>
+      {selectedApproval && demoState.dashboard.drawerOpen && (selectedApproval.approvalType === "Treasury multisig" ? <MultisigApprovalDrawer approval={selectedApproval} state={demoState} setState={setDemoState} onClose={closeApproval}/> : <ApprovalDrawer approval={selectedApproval} decision={decision} completedPayment={demoState.dashboard.paymentResult} paymentIdempotencyKey={`${selectedApproval.id}-${demoState.idempotency.payment}`} onPaymentComplete={completePayment} onDecline={declineApproval} onClose={() => { if (decision === "idle") closeApproval(); }} />)}
+      {decisionToast && <div role="status" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)]">Purchase {decisionToast}</div>}
       {resetToast && <div role="status" aria-live="polite" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)] animate-toast-in">Demo reset</div>}
+      {(introMode === "direct" || introMode === "full") && <AppEntryReveal mode={introMode} onComplete={() => { sessionStorage.removeItem(WITHIN_ENTRY_SOURCE_KEY); sessionStorage.setItem(WITHIN_APP_INTRO_SEEN_KEY,"true"); setIntroMode("ready"); }}/>} 
     </div>
   );
 }

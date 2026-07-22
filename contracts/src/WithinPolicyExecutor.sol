@@ -5,6 +5,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+/// @notice Hackathon prototype. Not audited. Not for production financial use.
 contract WithinPolicyExecutor is Ownable, Pausable, ReentrancyGuard {
     struct Policy {
         bool exists;

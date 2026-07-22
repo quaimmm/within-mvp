@@ -7,9 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --experimental-transform-types --test tests/*.test.ts"
+    "test": "node --experimental-transform-types --test tests/*.test.ts",
+    "test:contracts": "cd contracts && forge test --offline"
   },
   "dependencies": {
+    "@circle-fin/adapter-viem-v2": "^1.14.0",
+    "@circle-fin/app-kit": "^1.10.0",
     "next": "^16.0.0",
     "openai": "^6.48.0",
     "react": "^19.2.0",
@@ -29,6 +32,6 @@
     "typescript": "^5.9.0"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.0.0"
   }
 }

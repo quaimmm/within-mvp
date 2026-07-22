@@ -1,0 +1,10 @@
+{
+  "network": "Arc Testnet",
+  "chainId": 5042002,
+  "deployer": "",
+  "contracts": {
+    "WithinPolicyExecutor": { "address": "", "deploymentTx": "", "verified": false },
+    "WithinMultisigExecutor": { "address": "", "deploymentTx": "", "verified": false },
+    "WithinCreditFacility": { "address": "", "deploymentTx": "", "verified": false }
+  }
+}
