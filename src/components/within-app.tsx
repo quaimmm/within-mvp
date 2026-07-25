@@ -29,6 +29,7 @@ import { AnalyticsPage, ApprovalsPage, CardsPage, SettingsPage, TeamPage } from 
 import { AppEntryReveal, WITHIN_APP_INTRO_SEEN_KEY, WITHIN_ENTRY_SOURCE_KEY } from "@/components/app-entry-reveal";
 import { CreditPage } from "@/components/credit-page";
 import { creditAvailable, creditOutstanding } from "@/lib/credit/demo-credit";
+import { RulesArcPolicyStatus } from "@/components/rules-arc-policy-status";
 
 const navigation = [
   { label: "Dashboard", icon: OverviewIcon },
@@ -476,6 +477,8 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
 
         <div className="mt-8 flex items-start justify-between gap-8"><div aria-live="polite">{rule.active && <p className="text-[11px] text-success">Rule active</p>}{ruleError && ruleError.split("\n").map((line) => <p key={line} className="text-[10px] leading-5 text-[#9a4d45]">{line}</p>)}</div>{!rule.active && <Button onClick={activateRule} disabled={Boolean(operation)} variant="primary" className="h-11 px-6">{operation === "publish" ? "Activating rule…" : "Activate rule"}</Button>}</div>
       </section>}
+
+      <RulesArcPolicyStatus />
 
       <section className="mt-24 border-t border-border pt-10">
         <div><h3 className="text-[24px] font-normal tracking-[-0.04em] text-ink">Active rules</h3><p className="mt-2 text-[11px] text-muted">{demoState.dashboard.activeRuleCount} rules guide company spending.</p></div>
