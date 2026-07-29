@@ -4,25 +4,17 @@ import { isAddress } from "viem";
 import type { ArcWalletProviderDetail, ArcWalletState } from "./types";
 import type { BrowserEthereumProvider } from "./network";
 
-export const SELECTED_WALLET_SESSION_KEY = "within:selected-wallet";
+export const METAMASK_RDNS = "io.metamask";
 export type WalletSnapshot = { address: string | null; chainId: string | null };
 
-declare global {
-  interface Window {
-    ethereum?: BrowserEthereumProvider;
-  }
-}
+let currentWalletSession: ArcWalletState | null = null;
 
-function getSelectedWalletId(): string | null {
-  return typeof window === "undefined" ? null : sessionStorage.getItem(SELECTED_WALLET_SESSION_KEY);
-}
-
-function rememberSelectedWallet(id: string): void {
-  if (typeof window !== "undefined") sessionStorage.setItem(SELECTED_WALLET_SESSION_KEY, id);
+export function discardLegacyWalletPersistence(): void {
+  if (typeof window !== "undefined") sessionStorage.removeItem("within:selected-wallet");
 }
 
 export function clearSelectedWallet(): void {
-  if (typeof window !== "undefined") sessionStorage.removeItem(SELECTED_WALLET_SESSION_KEY);
+  currentWalletSession = null;
 }
 
 export async function discoverBrowserWallets(timeoutMs = 250): Promise<ArcWalletProviderDetail[]> {
@@ -37,42 +29,63 @@ export async function discoverBrowserWallets(timeoutMs = 250): Promise<ArcWallet
   await new Promise((resolve) => window.setTimeout(resolve, timeoutMs));
   window.removeEventListener("eip6963:announceProvider", announce as EventListener);
 
-  if (discovered.size === 0 && window.ethereum && (!window.ethereum.providers || window.ethereum.providers.length <= 1)) {
-    discovered.set("window.ethereum", { info: { uuid: "window.ethereum", name: "Browser wallet" }, provider: window.ethereum });
-  }
   return [...discovered.values()];
 }
 
-export async function connectBrowserWallet(detail?: ArcWalletProviderDetail): Promise<ArcWalletState> {
-  const wallets = detail ? [detail] : await discoverBrowserWallets();
-  if (wallets.length > 1 && !detail) throw new Error("Multiple wallets were detected. Choose the wallet you want to connect.");
-  const selected = detail ?? wallets[0];
-  if (!selected) throw new Error("No compatible browser wallet was detected.");
-  const accounts = await selected.provider.request({ method: "eth_requestAccounts" }) as string[];
-  const chainId = await selected.provider.request({ method: "eth_chainId" }) as string;
+export async function discoverMetaMask(timeoutMs = 250): Promise<ArcWalletProviderDetail | null> {
+  return (await discoverBrowserWallets(timeoutMs)).find((wallet) => wallet.info.rdns === METAMASK_RDNS) ?? null;
+}
+
+async function readProviderState(detail: ArcWalletProviderDetail): Promise<ArcWalletState> {
+  const accounts = await detail.provider.request({ method: "eth_accounts" }) as string[];
+  const chainId = await detail.provider.request({ method: "eth_chainId" }) as string;
   const address = accounts[0];
-  if (!address || !isAddress(address)) throw new Error("The wallet did not return a valid account.");
-  rememberSelectedWallet(selected.info.uuid);
-  return { address, chainId, provider: selected.provider, walletName: selected.info.name, walletId: selected.info.uuid };
+  return {
+    address: address && isAddress(address) ? address : null,
+    chainId,
+    provider: detail.provider,
+    walletName: detail.info.name,
+    walletId: detail.info.uuid,
+  };
+}
+
+export async function connectBrowserWallet(detail?: ArcWalletProviderDetail): Promise<ArcWalletState> {
+  const selected = detail?.info.rdns === METAMASK_RDNS ? detail : await discoverMetaMask();
+  if (!selected) throw new Error("MetaMask was not detected.");
+  await selected.provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  await selected.provider.request({ method: "eth_requestAccounts" });
+  const connected = await readProviderState(selected);
+  if (!connected.address) throw new Error("MetaMask did not return a connected account.");
+  currentWalletSession = connected;
+  return connected;
+}
+
+export async function switchMetaMaskAccount(detail?: ArcWalletProviderDetail): Promise<ArcWalletState> {
+  const selected = detail?.info.rdns === METAMASK_RDNS ? detail : await discoverMetaMask();
+  if (!selected) throw new Error("MetaMask was not detected.");
+  await selected.provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  await selected.provider.request({ method: "eth_requestAccounts" });
+  const connected = await readProviderState(selected);
+  if (!connected.address) throw new Error("MetaMask did not return a connected account.");
+  currentWalletSession = connected;
+  return connected;
 }
 
 export async function restoreBrowserWallet(): Promise<ArcWalletState | null> {
-  if (typeof window === "undefined") return null;
-  const selectedId = getSelectedWalletId();
-  if (!selectedId) return null;
-  const selected = (await discoverBrowserWallets()).find((wallet) => wallet.info.uuid === selectedId);
-  if (!selected) {
-    clearSelectedWallet();
-    return null;
-  }
-  const accounts = await selected.provider.request({ method: "eth_accounts" }) as string[];
-  const chainId = await selected.provider.request({ method: "eth_chainId" }) as string;
-  const address = accounts[0];
-  if (!address || !isAddress(address)) {
-    clearSelectedWallet();
-    return null;
-  }
-  return { address, chainId, provider: selected.provider, walletName: selected.info.name, walletId: selected.info.uuid };
+  return currentWalletSession;
+}
+
+export async function refreshBrowserWallet(detail: ArcWalletProviderDetail): Promise<ArcWalletState> {
+  if (detail.info.rdns !== METAMASK_RDNS) throw new Error("The selected provider is not MetaMask.");
+  const refreshed = await readProviderState(detail);
+  currentWalletSession = refreshed.address ? refreshed : null;
+  return refreshed;
+}
+
+export async function disconnectBrowserWallet(detail: ArcWalletProviderDetail | null): Promise<boolean> {
+  void detail;
+  clearSelectedWallet();
+  return false;
 }
 
 export function subscribeWallet(
@@ -80,18 +93,25 @@ export function subscribeWallet(
   initial: WalletSnapshot,
   onChange: (state: WalletSnapshot) => void,
   onDisconnect?: () => void,
+  onAccountChanged?: () => void,
 ): () => void {
   let address = initial.address;
   let chainId = initial.chainId;
   const emit = () => onChange({ address, chainId });
   const accountsChanged = (value: unknown) => {
     const accounts = Array.isArray(value) ? value as string[] : [];
-    address = accounts[0] && isAddress(accounts[0]) ? accounts[0] as `0x${string}` : null;
+    const nextAddress: `0x${string}` | null = accounts[0] && isAddress(accounts[0]) ? accounts[0] as `0x${string}` : null;
+    if (nextAddress?.toLowerCase() !== address?.toLowerCase()) onAccountChanged?.();
+    address = nextAddress;
     if (!address) clearSelectedWallet();
+    else if (currentWalletSession?.provider === provider) currentWalletSession = { ...currentWalletSession, address: nextAddress };
     emit();
+    if (!address) onDisconnect?.();
   };
   const chainChanged = (value: unknown) => {
     chainId = typeof value === "string" ? value : null;
+    onAccountChanged?.();
+    if (currentWalletSession?.provider === provider) currentWalletSession = { ...currentWalletSession, chainId };
     emit();
   };
   const disconnected = () => {
@@ -108,5 +128,19 @@ export function subscribeWallet(
     provider.removeListener?.("accountsChanged", accountsChanged);
     provider.removeListener?.("chainChanged", chainChanged);
     provider.removeListener?.("disconnect", disconnected);
+  };
+}
+
+export function subscribeWalletRecovery(refresh: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const onFocus = () => refresh();
+  const onVisibility = () => {
+    if (document.visibilityState === "visible") refresh();
+  };
+  window.addEventListener("focus", onFocus);
+  document.addEventListener("visibilitychange", onVisibility);
+  return () => {
+    window.removeEventListener("focus", onFocus);
+    document.removeEventListener("visibilitychange", onVisibility);
   };
 }

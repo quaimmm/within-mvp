@@ -1,0 +1,37 @@
+export const withinEmployeeCreditAbi = [
+  { type: "function", name: "MAX_CREDIT_LIMIT", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "uint256" }] },
+  { type: "function", name: "isEmployeeEligible", stateMutability: "view", inputs: [{ name: "employee", type: "address" }], outputs: [{ name: "", type: "bool" }] },
+  { type: "function", name: "getCreditAccount", stateMutability: "view", inputs: [{ name: "employee", type: "address" }], outputs: [{ name: "", type: "tuple", components: [
+    { name: "outstanding", type: "uint256" },
+    { name: "totalBorrowed", type: "uint256" },
+    { name: "totalRepaid", type: "uint256" },
+    { name: "instalmentAmount", type: "uint256" },
+    { name: "totalInstalments", type: "uint8" },
+    { name: "instalmentsPaid", type: "uint8" },
+    { name: "firstDueDate", type: "uint64" },
+    { name: "nextDueDate", type: "uint64" },
+    { name: "active", type: "bool" },
+  ] }] },
+  { type: "function", name: "availableCredit", stateMutability: "view", inputs: [{ name: "employee", type: "address" }], outputs: [{ name: "", type: "uint256" }] },
+  { type: "function", name: "poolBalance", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "uint256" }] },
+  { type: "function", name: "drawCredit", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }, { name: "instalments", type: "uint8" }, { name: "firstDueDate", type: "uint64" }], outputs: [] },
+  { type: "function", name: "repayNextInstalment", stateMutability: "nonpayable", inputs: [], outputs: [] },
+  { type: "event", name: "CreditDrawn", inputs: [
+    { name: "employee", type: "address", indexed: true },
+    { name: "amount", type: "uint256", indexed: false },
+    { name: "instalments", type: "uint8", indexed: false },
+    { name: "instalmentAmount", type: "uint256", indexed: false },
+    { name: "firstDueDate", type: "uint64", indexed: false },
+  ] },
+  { type: "event", name: "InstalmentRepaid", inputs: [
+    { name: "employee", type: "address", indexed: true },
+    { name: "amount", type: "uint256", indexed: false },
+    { name: "outstanding", type: "uint256", indexed: false },
+    { name: "instalmentsPaid", type: "uint8", indexed: false },
+    { name: "nextDueDate", type: "uint64", indexed: false },
+  ] },
+  { type: "event", name: "CreditClosed", inputs: [
+    { name: "employee", type: "address", indexed: true },
+    { name: "totalRepaid", type: "uint256", indexed: false },
+  ] },
+] as const;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AnalyticsIcon,
@@ -17,19 +18,24 @@ import {
 import { Button } from "@/components/ui/button";
 import { paymentStages, usePaymentExecution } from "@/hooks/use-payment-execution";
 import type { PaymentResult } from "@/lib/payments/types";
-import type { PolicyPublishRequest, PolicyPublishResult, SpendingPolicy } from "@/lib/policies/policy-publisher";
+import type { PolicyPublishResult, SpendingPolicy } from "@/lib/policies/policy-publisher";
 import { completeApprovalPayment, createCleanDemoState, DEMO_STORAGE_KEY, restoreDemoState } from "@/data/demo-state";
-import type { DashboardTransaction, DemoApproval, DemoPage, DemoState, TransactionStatus } from "@/data/demo-state";
+import type { DashboardTransaction, DemoApproval, DemoPage, DemoState } from "@/data/demo-state";
 import { demoModeEnabled } from "@/lib/demo/demo-mode";
 import { resetDemoState } from "@/lib/demo/reset-demo-state";
 import { BrandLogo } from "@/components/brand-logo";
 import { NetworkStatus } from "@/components/network-status";
 import { MockMultisigProvider } from "@/lib/multisig/mock-multisig-provider";
-import { AnalyticsPage, ApprovalsPage, CardsPage, SettingsPage, TeamPage } from "@/components/product-pages";
+import { AnalyticsPage, ApprovalsPage, CardsPage, TeamPage } from "@/components/product-pages";
+import { SettingsPage } from "@/components/settings-page";
 import { AppEntryReveal, WITHIN_APP_INTRO_SEEN_KEY, WITHIN_ENTRY_SOURCE_KEY } from "@/components/app-entry-reveal";
-import { CreditPage } from "@/components/credit-page";
-import { creditAvailable, creditOutstanding } from "@/lib/credit/demo-credit";
+import { EmployeeCreditPage } from "@/components/employee-credit-page";
 import { RulesArcPolicyStatus } from "@/components/rules-arc-policy-status";
+import { useWallet } from "@/components/wallet-provider";
+import { restoreBrowserWallet } from "@/lib/arc/browser-wallet";
+import { ARC_POLICY_ACTIVATION_STORAGE_KEY, ARC_POLICY_CONTRACT, confirmPolicyState, confirmPolicyStateForId, preparePolicyActivation, submitPolicyActivation, type PreparedPolicyActivation } from "@/lib/policies/arc-policy-activation";
+import { ARC_TESTNET, isArcTestnet, shortenAddress, type BrowserEthereumProvider } from "@/lib/arc/network";
+import { arcPublicClient } from "@/lib/contracts/arc-contract-clients";
 
 const navigation = [
   { label: "Dashboard", icon: OverviewIcon },
@@ -46,7 +52,11 @@ type Page = DemoPage;
 
 function Brand() {
   return (
-    <div className="flex h-16 items-center px-5"><BrandLogo variant="app" /></div>
+    <div className="flex h-16 items-center px-5">
+      <Link href="/" aria-label="Go to Within home" className="inline-flex cursor-pointer rounded-sm transition-opacity hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">
+        <BrandLogo variant="app" />
+      </Link>
+    </div>
   );
 }
 
@@ -88,31 +98,103 @@ function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (page: Page) =>
   );
 }
 
-function TopNavigation({ page, onReset, onNavigate, onSignOut }: { page: Page; onReset: () => void; onNavigate: (page: Page) => void; onSignOut: () => void }) {
+type AppWallet = { address: string | null; chainId: string | null; provider: BrowserEthereumProvider | null };
+
+const ExternalLinkIcon = ({ className = "size-3" }: { className?: string }) => <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}><path d="M6 3h7v7M13 3 7.5 8.5M12 9.5V13H3V4h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+
+function TopNavigation({
+  page,
+  wallet,
+  walletBusy,
+  onConnectWallet,
+  onSwitchNetwork,
+  onSwitchAccount,
+  onDisconnectWallet,
+  onReset,
+  onNavigate,
+  onSignOut,
+}: {
+  page: Page;
+  wallet: AppWallet;
+  walletBusy: boolean;
+  onConnectWallet: () => void;
+  onSwitchNetwork: () => void;
+  onSwitchAccount: () => void;
+  onDisconnectWallet: () => void;
+  onReset: () => void;
+  onNavigate: (page: Page) => void;
+  onSignOut: () => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const walletMenuRef = useRef<HTMLDivElement>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connected = Boolean(wallet.address);
+  const onArc = connected && isArcTestnet(wallet.chainId);
   useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") { setMenuOpen(false); setConfirmingReset(false); } };
+    if (!menuOpen && !walletOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") { setMenuOpen(false); setWalletOpen(false); setConfirmingReset(false); } };
+    const closeWalletOnOutsideClick = (event: PointerEvent) => {
+      if (walletOpen && !walletMenuRef.current?.contains(event.target as Node)) {
+        setWalletOpen(false);
+      }
+    };
     window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [menuOpen]);
+    window.addEventListener("pointerdown", closeWalletOnOutsideClick);
+    return () => {
+      window.removeEventListener("keydown", close);
+      window.removeEventListener("pointerdown", closeWalletOnOutsideClick);
+    };
+  }, [menuOpen, walletOpen]);
+  useEffect(() => () => {
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+  }, []);
+  const copyWalletAddress = async () => {
+    if (!wallet.address) return;
+    await navigator.clipboard.writeText(wallet.address);
+    setAddressCopied(true);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setAddressCopied(false), 1600);
+  };
   return (
     <header className="fixed left-[224px] right-0 top-0 z-10 flex h-[72px] items-center justify-between border-b border-border bg-canvas/95 px-10">
       <h1 className="text-[13px] font-medium tracking-[-0.02em] text-ink">{page}</h1>
-      <div className="relative"><button aria-label="Open profile" aria-expanded={menuOpen} onClick={() => { setMenuOpen((open) => !open); setConfirmingReset(false); }} className="flex items-center gap-3 outline-none"><span className="hidden text-right lg:block"><span className="block text-[10px] text-ink">Amanda Morgan</span><span className="mt-0.5 block text-[9px] text-muted">Administrator</span></span><span className="grid size-8 place-items-center rounded-full bg-[#e7e4dc] text-[10px] font-medium text-ink">AM</span></button>{demoModeEnabled && menuOpen && <div className="absolute right-0 top-11 w-64 rounded-xl border border-border bg-white p-3 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">{confirmingReset ? <div><p className="text-[11px] leading-5 text-ink">Reset the demo to its starting state?</p><div className="mt-3 flex justify-end gap-2"><Button onClick={() => setConfirmingReset(false)} className="h-8 px-3 text-[10px]">Cancel</Button><Button variant="primary" onClick={() => { onReset(); setMenuOpen(false); setConfirmingReset(false); }} className="h-8 px-3 text-[10px]">Reset</Button></div></div> : <div><div className="border-b border-border px-2 pb-3"><p className="text-[11px] text-ink">Amanda Morgan</p><p className="mt-1 text-[9px] text-muted">amanda@northstar.io</p><p className="mt-1 text-[9px] text-muted">Administrator</p></div><button onClick={() => { onNavigate("Settings"); setMenuOpen(false); }} className="mt-2 w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Company settings</button><button type="button" onClick={() => setConfirmingReset(true)} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Reset demo</button><button onClick={onSignOut} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Sign out</button></div>}</div>}</div>
+      <div className="flex items-center gap-2">
+        <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" title="Open the Circle Faucet" aria-label="Get test USDC from the Circle Faucet (opens in a new tab)" className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white/55 px-3 text-[10px] text-muted transition-colors hover:border-border-strong hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"><span>Get test USDC</span><ExternalLinkIcon/></a>
+        <div ref={walletMenuRef} className="relative">
+          {!connected ? (
+            <button type="button" aria-label="Connect wallet" onClick={onConnectWallet} disabled={walletBusy} className="inline-flex h-9 items-center rounded-lg border border-border bg-white/55 px-3 text-[10px] text-ink transition-colors hover:border-border-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
+              {walletBusy ? "Working…" : "Connect wallet"}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div aria-label={onArc ? "Arc Testnet network" : "Wrong network"} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white/55 px-3 text-[10px] text-ink">
+                <span className={`size-1.5 rounded-full ${onArc ? "bg-success" : "bg-[#b88435]"}`}/>
+                {onArc ? "Arc Testnet" : "Wrong network"}
+              </div>
+              <button type="button" aria-label="Open connected wallet menu" aria-haspopup="menu" aria-expanded={walletOpen} onClick={() => setWalletOpen((open) => !open)} disabled={walletBusy} className="inline-flex h-9 items-center rounded-lg border border-border bg-white/55 px-3 text-[10px] text-ink transition-colors hover:border-border-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
+                <span>{shortenAddress(wallet.address)}</span>
+              </button>
+            </div>
+          )}
+          {connected && walletOpen && <div role="menu" aria-label="Connected wallet" className="absolute right-0 top-11 w-72 rounded-xl border border-border bg-white p-4 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">
+            <p className="text-[10px] font-medium text-ink">Connected wallet</p>
+            <p className="mt-2 break-all text-[9px] leading-4 text-muted">{wallet.address}</p>
+            <div className="mt-4 border-t border-border pt-3 text-[10px]">
+              <button type="button" role="menuitem" onClick={() => void copyWalletAddress()} className="block w-full rounded-md px-2 py-2 text-left text-muted hover:bg-canvas hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{addressCopied ? "Copied" : "Copy address"}</button>
+              <a href={`${ARC_TESTNET.explorerUrl}/address/${wallet.address}`} target="_blank" rel="noopener noreferrer" aria-label="View connected wallet on ArcScan (opens in a new tab)" className="flex items-center justify-between rounded-md px-2 py-2 text-muted hover:bg-canvas hover:text-ink">View on ArcScan<ExternalLinkIcon/></a>
+              {!onArc && <button type="button" role="menuitem" onClick={onSwitchNetwork} className="block w-full rounded-md px-2 py-2 text-left text-accent hover:bg-canvas focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">Switch to Arc Testnet</button>}
+              <button type="button" role="menuitem" onClick={() => { setWalletOpen(false); onSwitchAccount(); }} className="block w-full rounded-md px-2 py-2 text-left text-muted hover:bg-canvas hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">Connect another account</button>
+              <button type="button" role="menuitem" onClick={() => { setWalletOpen(false); onDisconnectWallet(); }} className="block w-full rounded-md px-2 py-2 text-left text-muted hover:bg-canvas hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">Disconnect</button>
+            </div>
+          </div>}
+        </div>
+        <div className="relative"><button aria-label="Open profile" aria-expanded={menuOpen} onClick={() => { setMenuOpen((open) => !open); setConfirmingReset(false); }} className="grid size-8 place-items-center rounded-full bg-[#e7e4dc] text-[10px] font-medium text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30">AM</button>{demoModeEnabled && menuOpen && <div className="absolute right-0 top-11 w-64 rounded-xl border border-border bg-white p-3 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">{confirmingReset ? <div><p className="text-[11px] leading-5 text-ink">Reset the workspace to its starting state?</p><div className="mt-3 flex justify-end gap-2"><Button onClick={() => setConfirmingReset(false)} className="h-8 px-3 text-[10px]">Cancel</Button><Button variant="primary" onClick={() => { onReset(); setMenuOpen(false); setConfirmingReset(false); }} className="h-8 px-3 text-[10px]">Reset</Button></div></div> : <div><div className="border-b border-border px-2 pb-3"><p className="text-[11px] text-ink">Amanda Morgan</p><p className="mt-1 text-[9px] text-muted">amanda@northstar.io</p><p className="mt-1 text-[9px] text-muted">Administrator</p></div><button onClick={() => { onNavigate("Settings"); setMenuOpen(false); }} className="mt-2 w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Company settings</button><button type="button" onClick={() => setConfirmingReset(true)} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Reset workspace</button><button onClick={onSignOut} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Sign out</button></div>}</div>}</div>
+      </div>
     </header>
   );
-}
-
-function StatusBadge({ status }: { status: TransactionStatus }) {
-  const styles = {
-    Approved: "text-success before:bg-success",
-    Pending: "text-[#8a642b] before:bg-[#b88435]",
-    Flagged: "text-[#9a4d45] before:bg-[#b85b51]",
-    Declined: "text-muted before:bg-faint",
-  }[status];
-  return <span className={`inline-flex items-center gap-1.5 text-[10px] font-medium before:size-1 before:rounded-full ${styles}`}>{status}</span>;
 }
 
 type DecisionState = "idle" | "declining" | "declined";
@@ -143,7 +225,7 @@ function PaymentExecutionView({ approval, status, activeStage, result, errorMess
             <details className="group/tech mt-4">
               <summary className="flex cursor-pointer list-none items-center justify-between py-2 text-[10px] text-muted marker:hidden">Technical details<span className="text-faint transition-transform duration-200 group-open/tech:rotate-45">＋</span></summary>
               <dl className="space-y-3 pt-3 text-[9px]">
-                {(result.provider === "arc" ? [["Provider", "ArcPaymentProvider"], ["Network", "Arc Testnet"], ["Test settlement", `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}`], ["Enforcement", "Onchain spending rule"], ["Contract", shortenTransactionHash(result.contractAddress)], ["Policy", result.policyId || approval.policyId], ["Transaction", shortenTransactionHash(result.transactionHash)]] : [["Provider", "MockPaymentProvider"], ["Network", "Demo environment"], ["Evidence", "Demo settlement — no onchain transaction"], ["Policy ID", approval.policyId]]).map(([label, value]) => <div key={label} className="flex justify-between gap-5"><dt className="text-faint">{label}</dt><dd className="font-medium text-ink">{value}</dd></div>)}
+                {(result.provider === "arc" ? [["Provider", "ArcPaymentProvider"], ["Network", "Arc Testnet"], ["Test settlement", `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}`], ["Enforcement", "Onchain spending rule"], ["Contract", shortenTransactionHash(result.contractAddress)], ["Policy", result.policyId || approval.policyId], ["Transaction", shortenTransactionHash(result.transactionHash)]] : [["Processing", "Local workflow"], ["Evidence", "No onchain transaction"], ["Policy ID", approval.policyId]]).map(([label, value]) => <div key={label} className="flex justify-between gap-5"><dt className="text-faint">{label}</dt><dd className="font-medium text-ink">{value}</dd></div>)}
                 {result.provider === "arc" && result.explorerUrl && <a href={result.explorerUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-[9px] text-accent hover:underline">View transaction</a>}
               </dl>
             </details>
@@ -234,7 +316,7 @@ function ApprovalDrawer({ approval, decision, completedPayment, paymentIdempoten
                 <p className="mt-2 text-[10px] text-muted">{approval.approvalNote}</p>
               </section>
 
-              {(approval.businessReason || approval.settlementAmount) && <section className="mt-8 border-t border-border pt-6"><p className="text-[10px] text-muted">Request details</p><dl className="mt-4 space-y-3 text-[11px]"><div className="flex justify-between gap-6"><dt className="text-muted">Business reason</dt><dd className="text-right">{approval.businessReason || "Not provided"}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Settlement amount</dt><dd>{approval.settlementAmount ? `${approval.settlementAmount} ${approval.settlementAsset}` : "Determined after approval"}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Approval type</dt><dd>{approval.approvalType}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Risk</dt><dd>{approval.risk}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Arc network</dt><dd>Demo settlement</dd></div></dl></section>}
+              {(approval.businessReason || approval.settlementAmount) && <section className="mt-8 border-t border-border pt-6"><p className="text-[10px] text-muted">Request details</p><dl className="mt-4 space-y-3 text-[11px]"><div className="flex justify-between gap-6"><dt className="text-muted">Business reason</dt><dd className="text-right">{approval.businessReason || "Not provided"}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Settlement amount</dt><dd>{approval.settlementAmount ? `${approval.settlementAmount} ${approval.settlementAsset}` : "Determined after approval"}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Approval type</dt><dd>{approval.approvalType}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Risk</dt><dd>{approval.risk}</dd></div><div className="flex justify-between gap-6"><dt className="text-muted">Arc network</dt><dd>Not submitted</dd></div></dl></section>}
 
               <section className="mt-8 border-t border-border pt-6">
                 <p className="text-[10px] text-muted">Why review it?</p>
@@ -265,61 +347,39 @@ function MultisigApprovalDrawer({ approval, state, setState, onClose }: { approv
   const event=(category:string,eventId:string,employee=signer.name):DashboardTransaction=>({id:`activity-${eventId}`,eventId,initials:employee.split(" ").map((part)=>part[0]).join(""),employee,role:signer.role,merchant:approval.merchant,category,amount:`£${approval.amount.toLocaleString("en-GB",{minimumFractionDigits:2})}`,status:"Approved"});
   const addUnique=(activity:DashboardTransaction[],item:DashboardTransaction)=>activity.some((entry)=>entry.eventId===item.eventId)?activity:[item,...activity];
   const approve=async()=>{if(working)return;setWorking(true);setMessage(null);try{const next=await provider.approve(request,signer.id);const reached=next.status==="Ready to settle";setState((current)=>({...current,treasury:{...current.treasury,requests:current.treasury.requests.map((item)=>item.id===request.id?next:item)},approvals:current.approvals.map(item=>item.id===approval.id?{...item,requestStatus:reached?"Ready to settle":item.requestStatus}:item),dashboard:{...current.dashboard,activity:addUnique(current.dashboard.activity,event(reached?"Threshold reached · 2 of 2":"Signer approved",`${request.id}:approval:${signer.id}`))}}));}catch(error){setMessage(error instanceof Error?error.message:"Approval failed.");}finally{setWorking(false);}};
-  const settle=async()=>{if(working)return;setWorking(true);setMessage(null);try{const next=await provider.settle(request);setState((current)=>{const submitted=addUnique(current.dashboard.activity,event("Settlement submitted",`${request.id}:settlement-submitted`));const confirmed=addUnique(submitted,event("Settlement confirmed",`${request.id}:settlement-confirmed`));return {...current,treasury:{...current.treasury,requests:current.treasury.requests.map((item)=>item.id===request.id?next:item)},approvals:current.approvals.map((item)=>item.id===approval.id?{...item,status:"Approved",requestStatus:"Completed"}:item),dashboard:{...current.dashboard,pendingCount:Math.max(0,current.dashboard.pendingCount-1),companySpend:current.dashboard.companySpend+approval.amount,budgetRemaining:Math.max(0,current.dashboard.budgetRemaining-approval.amount),activity:confirmed}};});setMessage("Demo settlement confirmed.");}catch(error){setMessage(error instanceof Error?error.message:"Settlement failed.");}finally{setWorking(false);}};
+  const settle=async()=>{if(working)return;setWorking(true);setMessage(null);try{const next=await provider.settle(request);setState((current)=>{const submitted=addUnique(current.dashboard.activity,event("Settlement submitted",`${request.id}:settlement-submitted`));const confirmed=addUnique(submitted,event("Settlement confirmed",`${request.id}:settlement-confirmed`));return {...current,treasury:{...current.treasury,requests:current.treasury.requests.map((item)=>item.id===request.id?next:item)},approvals:current.approvals.map((item)=>item.id===approval.id?{...item,status:"Approved",requestStatus:"Completed"}:item),dashboard:{...current.dashboard,pendingCount:Math.max(0,current.dashboard.pendingCount-1),companySpend:current.dashboard.companySpend+approval.amount,budgetRemaining:Math.max(0,current.dashboard.budgetRemaining-approval.amount),activity:confirmed}};});setMessage("Approval workflow completed.");}catch(error){setMessage(error instanceof Error?error.message:"Settlement failed.");}finally{setWorking(false);}};
   const decline=()=>setState((current)=>({...current,treasury:{...current.treasury,requests:current.treasury.requests.map((item)=>item.id===request.id?{...item,status:"Declined"}:item)},approvals:current.approvals.map((item)=>item.id===approval.id?{...item,status:"Declined",requestStatus:"Declined"}:item),dashboard:{...current.dashboard,pendingCount:Math.max(0,current.dashboard.pendingCount-1)}}));
-  return <><button aria-label="Close approval drawer" onClick={onClose} className="fixed inset-y-0 left-[224px] right-0 top-[72px] z-30 bg-ink/10"/><aside aria-label="Treasury multisig approval" className="fixed bottom-0 right-0 top-[72px] z-40 flex w-[520px] flex-col border-l border-border bg-white shadow-[-24px_0_70px_rgba(23,24,21,.1)]"><div className="flex items-center justify-between border-b border-border px-8 py-5"><p className="text-[11px]">Treasury multisig</p><button aria-label="Close drawer" onClick={onClose} disabled={working} className="text-muted">×</button></div><div className="flex-1 overflow-y-auto px-8 py-8"><div className="flex justify-between"><div><p className="text-[11px] text-muted">{approval.employeeName} · {approval.department}</p><h2 className="mt-2 text-[27px] tracking-[-.04em]">{approval.merchant}</h2></div><p className="text-[30px] tracking-[-.04em]">£{approval.amount.toLocaleString("en-GB")}</p></div><section className="mt-9 border-t border-border pt-6"><p className="text-[10px] text-muted">Matched rule</p><p className="mt-3 text-[12px]">{approval.ruleName}</p><p className="mt-2 text-[10px] text-muted">{approval.policyId}</p><button onClick={()=>setState((current)=>({...current,page:"Rules",dashboard:{...current.dashboard,drawerOpen:false,selectedApprovalId:null}}))} className="mt-3 text-[10px] text-accent">View policy</button></section><section className="mt-7 border-t border-border pt-6"><p className="text-[10px] text-muted">Why multisig?</p><p className="mt-3 text-[12px] leading-5">{approval.reviewReason}</p></section><section className="mt-7 border-t border-border pt-6"><div className="flex justify-between"><p className="text-[10px] text-muted">Signer progress</p><p className="text-[10px] text-accent">{approvals} of {request.required} approvals</p></div><div className="mt-5 divide-y divide-border border-y border-border">{state.treasury.signers.map((item)=>{const decision=request.decisions.find((entry)=>entry.signerId===item.id);return <div key={item.id} className="flex justify-between py-3 text-[10px]"><span>{item.name}<span className="ml-2 text-faint">{item.role}</span></span><span className={decision?"text-success":"text-muted"}>{decision?.decision??"Awaiting"}</span></div>})}</div></section><section className="mt-7 border-t border-border pt-6"><NetworkStatus address={state.wallet.address} chainId={state.wallet.chainId} mock/><p className="mt-3 text-[10px] text-muted">Status: {request.status}</p><p className="mt-2 text-[9px] text-faint">Expires {new Date(request.expiresAt).toLocaleDateString("en-GB")}</p></section>{message&&<p role="status" className="mt-5 text-[10px] text-muted">{message}</p>}<details className="mt-7 border-t border-border pt-5 text-[10px] text-muted"><summary>View settlement details</summary><p className="mt-3">Demo settlement. No transaction hash or explorer link is created in mock mode.</p></details></div><div className="border-t border-border p-6"><p className="mb-4 text-[9px] text-muted">Acting as {signer.name} · Demo identity simulation</p><div className="grid grid-cols-2 gap-3">{request.status==="Ready to settle"?<Button variant="primary" disabled={working} onClick={settle} className="col-span-2 h-11">{working?"Settling…":"Execute demo settlement"}</Button>:request.status==="Settlement confirmed"?<Button onClick={onClose} className="col-span-2 h-11">Close</Button>:<><Button disabled={working||request.status!=="Awaiting signatures"} onClick={decline}>Decline</Button><Button variant="primary" disabled={working||request.status!=="Awaiting signatures"} onClick={approve}>{working?"Approving…":"Approve as current signer"}</Button></>}</div></div></aside></>;
+  return <><button aria-label="Close approval drawer" onClick={onClose} className="fixed inset-y-0 left-[224px] right-0 top-[72px] z-30 bg-ink/10"/><aside aria-label="Treasury multisig approval" className="fixed bottom-0 right-0 top-[72px] z-40 flex w-[520px] flex-col border-l border-border bg-white shadow-[-24px_0_70px_rgba(23,24,21,.1)]"><div className="flex items-center justify-between border-b border-border px-8 py-5"><p className="text-[11px]">Treasury multisig</p><button aria-label="Close drawer" onClick={onClose} disabled={working} className="text-muted">×</button></div><div className="flex-1 overflow-y-auto px-8 py-8"><div className="flex justify-between"><div><p className="text-[11px] text-muted">{approval.employeeName} · {approval.department}</p><h2 className="mt-2 text-[27px] tracking-[-.04em]">{approval.merchant}</h2></div><p className="text-[30px] tracking-[-.04em]">£{approval.amount.toLocaleString("en-GB")}</p></div><section className="mt-9 border-t border-border pt-6"><p className="text-[10px] text-muted">Matched rule</p><p className="mt-3 text-[12px]">{approval.ruleName}</p><p className="mt-2 text-[10px] text-muted">{approval.policyId}</p><button onClick={()=>setState((current)=>({...current,page:"Rules",dashboard:{...current.dashboard,drawerOpen:false,selectedApprovalId:null}}))} className="mt-3 text-[10px] text-accent">View policy</button></section><section className="mt-7 border-t border-border pt-6"><p className="text-[10px] text-muted">Why multisig?</p><p className="mt-3 text-[12px] leading-5">{approval.reviewReason}</p></section><section className="mt-7 border-t border-border pt-6"><div className="flex justify-between"><p className="text-[10px] text-muted">Signer progress</p><p className="text-[10px] text-accent">{approvals} of {request.required} approvals</p></div><div className="mt-5 divide-y divide-border border-y border-border">{state.treasury.signers.map((item)=>{const decision=request.decisions.find((entry)=>entry.signerId===item.id);return <div key={item.id} className="flex justify-between py-3 text-[10px]"><span>{item.name}<span className="ml-2 text-faint">{item.role}</span></span><span className={decision?"text-success":"text-muted"}>{decision?.decision??"Awaiting"}</span></div>})}</div></section><section className="mt-7 border-t border-border pt-6"><NetworkStatus address={state.wallet.address} chainId={state.wallet.chainId} mock/><p className="mt-3 text-[10px] text-muted">Status: {request.status}</p><p className="mt-2 text-[9px] text-faint">Expires {new Date(request.expiresAt).toLocaleDateString("en-GB")}</p></section>{message&&<p role="status" className="mt-5 text-[10px] text-muted">{message}</p>}<details className="mt-7 border-t border-border pt-5 text-[10px] text-muted"><summary>View settlement details</summary><p className="mt-3">This approval is completed locally and does not create an Arc transaction or explorer link.</p></details></div><div className="border-t border-border p-6"><p className="mb-4 text-[9px] text-muted">Acting as {signer.name} · Local approval identity</p><div className="grid grid-cols-2 gap-3">{request.status==="Ready to settle"?<Button variant="primary" disabled={working} onClick={settle} className="col-span-2 h-11">{working?"Settling…":"Complete local settlement"}</Button>:request.status==="Settlement confirmed"?<Button onClick={onClose} className="col-span-2 h-11">Close</Button>:<><Button disabled={working||request.status!=="Awaiting signatures"} onClick={decline}>Decline</Button><Button variant="primary" disabled={working||request.status!=="Awaiting signatures"} onClick={approve}>{working?"Approving…":"Approve as current signer"}</Button></>}</div></div></aside></>;
 }
 
-function Dashboard({ demoState, onOpenApproval }: { demoState: DemoState; onOpenApproval: (id: string) => void }) {
+function Dashboard({ demoState, wallet, onOpenApproval }: { demoState: DemoState; wallet: AppWallet; onOpenApproval: (id: string) => void }) {
   const approvalTriggerRef = useRef<HTMLButtonElement>(null);
-  const { dashboard } = demoState;
-  const awaitingTreasury = demoState.treasury.requests.filter((request) => request.status === "Awaiting signatures").length;
-  const readyTreasury = demoState.treasury.requests.filter((request) => request.status === "Ready to settle").length;
+  const activeArcPolicy = demoState.rules.generatedRule?.active && demoState.rules.generatedRule.settlementGuard?.enforcement === "onchain";
+  const latestConfirmedTransaction = demoState.dashboard.paymentResult?.provider === "arc"
+    ? demoState.dashboard.paymentResult.transactionHash
+    : activeArcPolicy ? demoState.rules.generatedRule?.settlementGuard?.transactionHash : null;
+  const liveStatuses = [
+    activeArcPolicy ? "Active Arc policy" : null,
+    wallet.address && isArcTestnet(wallet.chainId) ? "Wallet connected" : null,
+    latestConfirmedTransaction ? `Latest confirmed transaction · ${shortenTransactionHash(latestConfirmedTransaction)}` : null,
+  ].filter((item): item is string => Boolean(item));
 
   return (
     <div className="mx-auto max-w-[1120px]">
-      <section className="pt-4">
-        <p className="text-[11px] text-muted">Company spend this month</p>
-        <h2 className="mt-3 text-[64px] font-normal leading-none tracking-[-0.06em] text-ink">£{dashboard.companySpend.toLocaleString("en-GB")}</h2>
-        <p className="mt-5 text-[12px] text-success">8% below plan</p>
-
-        <div className="mt-12 grid max-w-2xl grid-cols-3 divide-x divide-border border-t border-border pt-6">
-          <div className="pr-8"><p className="text-[10px] text-muted">Budget remaining</p><p className="mt-2 text-[20px] font-normal tracking-[-0.03em] text-ink">£{dashboard.budgetRemaining.toLocaleString("en-GB")}</p></div>
-          <div className="px-8"><p className="text-[10px] text-muted">Pending approvals</p><p className="mt-2 text-[20px] font-normal tracking-[-0.03em] text-ink transition-all duration-200">{dashboard.pendingCount}</p></div>
-          <div className="pl-8"><p className="text-[10px] text-muted">Active rules</p><p className="mt-2 text-[20px] font-normal tracking-[-0.03em] text-ink">{dashboard.activeRuleCount}</p></div>
-        </div>
-        {(awaitingTreasury > 0 || readyTreasury > 0) && <button type="button" onClick={() => onOpenApproval("APR-DANIEL-BA")} className="mt-8 flex items-center gap-3 text-left text-[10px] text-muted transition-colors hover:text-ink"><span className="size-1.5 rounded-full bg-[#b88435]"/><span>Treasury approvals</span><span className="text-ink">{readyTreasury > 0 ? `${readyTreasury} ready to settle` : `${awaitingTreasury} awaiting signature`}</span><span aria-hidden="true">›</span></button>}
-        <div className="mt-8 flex max-w-2xl items-center justify-between border-t border-border pt-5 text-[10px]"><span className="text-ink">Company Credit</span><span className="text-muted">{creditAvailable(demoState.credit).toLocaleString("en-GB")} USDC available</span><span className="text-muted">{creditOutstanding(demoState.credit).toLocaleString("en-GB")} USDC outstanding</span><span className="text-muted">{demoState.credit.requests.filter((request)=>request.status==="Awaiting finance approval").length} pending drawdown</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
+        <p className="text-[10px] text-muted">Northstar Labs · Arc Testnet</p>
+        <p className="text-[10px] text-faint">AI proposes. Humans approve. Arc executes.</p>
+      </div>
+      {liveStatuses.length > 0 && <div className="mt-5 flex flex-wrap gap-x-7 gap-y-2 text-[9px] text-muted">{liveStatuses.map((status) => <span key={status} className="flex items-center gap-2"><i className="size-1 rounded-full bg-success"/>{status}</span>)}</div>}
+      <section className="pt-16">
+        <p className="text-[10px] text-accent">Arc Testnet Beta</p>
+        <h2 className="mt-4 max-w-2xl text-[42px] font-normal leading-tight tracking-[-0.05em] text-ink">Programmable company spending.</h2>
+        <p className="mt-5 max-w-xl text-[12px] leading-6 text-muted">Set spending rules, approve decisions and access employee credit through one clear workspace built on Arc.</p>
       </section>
 
-      <section className="mt-20 border-t border-border pt-8">
-        <div className="flex items-start justify-between"><div><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Monthly spend</h3><p className="mt-2 text-[11px] text-muted">February — July</p></div><p className="text-[11px] text-muted">£42,310 in July</p></div>
-        <div className="relative mt-10 h-[190px] border-b border-border">
-          <div className="absolute inset-x-0 top-1/2 border-t border-border/60" />
-          <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 900 190" preserveAspectRatio="none" aria-label="Monthly spend trend">
-            <path d="M0 150 C95 144, 122 118, 180 124 S300 106, 360 112 S475 70, 540 82 S660 47, 720 61 S832 92,900 42" fill="none" stroke="#3157d5" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-            {[0,180,360,540,720,900].map((x, index) => <circle key={x} cx={x} cy={[150,124,112,82,61,42][index]} r="3" fill="#f7f7f4" stroke="#3157d5" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />)}
-          </svg>
-          <div className="absolute -bottom-7 inset-x-0 flex justify-between text-[9px] text-faint"><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span></div>
-        </div>
-      </section>
-
-      <div className="mt-24 grid grid-cols-[1.6fr_0.8fr] gap-16 border-t border-border pt-8">
+      <div className="mt-20 border-t border-border pt-8">
         <section>
-          <div><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Recent activity</h3><p className="mt-2 text-[11px] text-muted">Latest company purchases</p></div>
-          <div className="mt-6 divide-y divide-border">
-            {dashboard.activity.slice(0, 5).map((transaction) => (
-              <div key={transaction.id} className="grid grid-cols-[1fr_120px_90px] items-center gap-5 py-4">
-                <div className="min-w-0"><p className="truncate text-[12px] font-medium text-ink">{transaction.merchant}</p><p className="mt-1 text-[10px] text-muted">{transaction.employee} · {transaction.category}</p></div>
-                <p className="text-right text-[11px] font-medium tabular-nums text-ink">{transaction.amount}</p>
-                <div className="text-right"><StatusBadge status={transaction.status} /></div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="border-l border-border pl-10">
-          <div><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Needs review</h3><p className="mt-2 text-[11px] text-muted">{dashboard.pendingCount} pending approvals</p></div>
+          <div><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Approval workspace</h3><p className="mt-2 text-[11px] text-muted">Local workflow</p></div>
           <div className="mt-6 divide-y divide-border">
             {demoState.approvals.filter((item) => item.status === "Pending" || item.status === "Flagged").map((item, index) => (
               <button ref={index === 0 ? approvalTriggerRef : undefined} data-testid={item.id === "APR-EMILY-OPENAI" ? "emily-approval" : undefined} onClick={() => onOpenApproval(item.id)} key={item.id} className="group flex w-full items-center gap-3 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/20">
@@ -349,6 +409,21 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
   const [generationLoading, setGenerationLoading] = useState(false);
   const [operation, setOperation] = useState<"publish" | "status" | null>(null);
   const [ruleError, setRuleError] = useState<string | null>(null);
+  const [preparedActivation, setPreparedActivation] = useState<PreparedPolicyActivation | null>(null);
+  const [activationHash, setActivationHash] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      const stored = sessionStorage.getItem(ARC_POLICY_ACTIVATION_STORAGE_KEY);
+      if (!stored || !rule?.policyId) return;
+      try {
+        const record = JSON.parse(stored) as { hash?: string; policyId?: string };
+        if (record.policyId === rule.policyId && record.hash && /^0x[0-9a-f]{64}$/i.test(record.hash)) setActivationHash(record.hash);
+      } catch {
+        sessionStorage.removeItem(ARC_POLICY_ACTIVATION_STORAGE_KEY);
+      }
+    });
+  }, [rule?.policyId]);
 
   function setDescription(value: string) {
     setDemoState((state) => ({ ...state, rules: { ...state.rules, input: value } }));
@@ -377,6 +452,8 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
       const response = await fetch("/api/policies/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: description }) });
       const result = await response.json() as { success: boolean; policy?: SpendingPolicy; message?: string };
       if (!response.ok || !result.success || !result.policy) throw new Error(result.message || "Rule could not be created.\nYour description has been preserved.");
+      setPreparedActivation(null);
+      setActivationHash(null);
       setRule(result.policy);
       setGenerationResult("ready", result.message || null);
     } catch (error) {
@@ -399,26 +476,52 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
 
   async function activateRule() {
     if (!rule || operation || rule.businessLimit <= 0 || !rule.policyId) return;
-    const updatedAt = new Date().toISOString();
-    const request: PolicyPublishRequest = {
-      policyId: rule.policyId,
-      name: rule.name,
-      businessLimit: rule.businessLimit,
-      businessCurrency: rule.businessCurrency,
-      settlementMaxPerTransactionUSDC: "0.05",
-      settlementPeriodLimitUSDC: "1.00",
-      active: true,
-      idempotencyKey: `policy-publish:${rule.policyId}:${demoState.idempotency.publish}`,
-    };
     setOperation("publish");
     setRuleError(null);
     try {
-      const response = await fetch("/api/policies/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
-      const result = await response.json() as PolicyPublishResult & { error?: string };
-      if (!response.ok || !result.success) throw new Error(result.error || "Rule could not be activated.\nNo changes were published.");
-      setDemoState((state) => ({ ...state, dashboard: { ...state.dashboard, activeRuleCount: state.rules.generatedRule?.active ? state.dashboard.activeRuleCount : state.dashboard.activeRuleCount + 1 }, rules: { ...state.rules, generatedRule: state.rules.generatedRule ? ({ ...state.rules.generatedRule, active: true, status: "Active", updatedAt, settlementGuard: settlementGuardFromResult(result) }) : null }, idempotency: { ...state.idempotency, publish: crypto.randomUUID() } }));
+      const wallet = await restoreBrowserWallet();
+      if (!wallet?.provider) throw new Error("Connect the policy owner wallet first.");
+      setPreparedActivation(await preparePolicyActivation(wallet.provider, rule.policyId));
     } catch (error) {
-      setRuleError(error instanceof Error ? error.message : "Rule could not be activated.\nNo changes were published.");
+      setPreparedActivation(null);
+      setRuleError(error instanceof Error ? error.message : "Activation could not be prepared.");
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function confirmActivation() {
+    if (!rule || !preparedActivation || operation || activationHash) return;
+    setOperation("publish");
+    setRuleError(null);
+    try {
+      const wallet = await restoreBrowserWallet();
+      if (!wallet?.provider) throw new Error("Connect the policy owner wallet first.");
+      const hash = await submitPolicyActivation(wallet.provider, preparedActivation);
+      sessionStorage.setItem(ARC_POLICY_ACTIVATION_STORAGE_KEY, JSON.stringify({ hash, policyId: rule.policyId }));
+      setActivationHash(hash);
+      const receipt = await arcPublicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success" || !(await confirmPolicyState(preparedActivation))) throw new Error("Transaction submitted. Confirmation is temporarily unavailable.");
+      const updatedAt = new Date().toISOString();
+      setDemoState((state) => ({ ...state, dashboard: { ...state.dashboard, activeRuleCount: state.rules.generatedRule?.active ? state.dashboard.activeRuleCount : state.dashboard.activeRuleCount + 1 }, rules: { ...state.rules, generatedRule: state.rules.generatedRule ? ({ ...state.rules.generatedRule, active: true, status: "Active", updatedAt, settlementGuard: { maxPerTransactionUSDC: "0.05", periodLimitUSDC: "1.00", enforcement: "onchain", transactionHash: hash, explorerUrl: `${ARC_TESTNET.explorerUrl}/tx/${hash}`, contractAddress: ARC_POLICY_CONTRACT } }) : null } }));
+    } catch (error) {
+      setRuleError(error instanceof Error ? error.message : activationHash ? "Transaction submitted. Confirmation is temporarily unavailable." : "Activation could not be submitted.");
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function checkActivationStatus() {
+    if (!rule || !activationHash) return;
+    setOperation("publish");
+    try {
+      const receipt = await arcPublicClient.getTransactionReceipt({ hash: activationHash as `0x${string}` });
+      if (receipt.status !== "success" || !(await confirmPolicyStateForId(rule.policyId))) throw new Error();
+      const updatedAt = new Date().toISOString();
+      setDemoState((state) => ({ ...state, rules: { ...state.rules, generatedRule: state.rules.generatedRule ? { ...state.rules.generatedRule, active: true, status: "Active", updatedAt, settlementGuard: { maxPerTransactionUSDC: "0.05", periodLimitUSDC: "1.00", enforcement: "onchain", transactionHash: activationHash, explorerUrl: `${ARC_TESTNET.explorerUrl}/tx/${activationHash}`, contractAddress: ARC_POLICY_CONTRACT } } : null } }));
+      setRuleError(null);
+    } catch {
+      setRuleError("Transaction submitted. Confirmation is temporarily unavailable.");
     } finally {
       setOperation(null);
     }
@@ -472,10 +575,11 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
 
         <details className="group border-b border-border">
           <summary className="flex cursor-pointer list-none items-center justify-between py-5 text-[11px] text-muted marker:hidden">More options<span className="text-faint transition-transform duration-200 group-open:rotate-45">＋</span></summary>
-          <dl className="grid grid-cols-2 gap-x-12 gap-y-5 border-t border-border py-6 text-[10px]"><div><dt className="text-faint">Description</dt><dd><textarea aria-label="Rule description" value={rule.description} onChange={(event) => updateRule("description", event.target.value)} rows={2} className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Limit cadence</dt><dd><select aria-label="Limit cadence" value={rule.limitType} onChange={(event) => updateRule("limitType", event.target.value as SpendingPolicy["limitType"])} className={fieldClass}><option value="monthly">Monthly</option><option value="per_transaction">Per transaction</option></select></dd></div><div><dt className="text-faint">Approval threshold</dt><dd><input aria-label="Approval threshold" type="number" disabled={!rule.approvalRequired} value={rule.approvalThreshold ?? ""} onChange={(event) => updateRule("approvalThreshold", Number(event.target.value))} className={`${fieldClass} disabled:opacity-40`} /></dd></div><div><dt className="text-faint">Recurring purchases</dt><dd><select aria-label="Recurring purchases" value={rule.recurringAllowed ? "allowed" : "not_allowed"} onChange={(event) => updateRule("recurringAllowed", event.target.value === "allowed")} className={fieldClass}><option value="allowed">Allowed</option><option value="not_allowed">Not allowed</option></select></dd></div><div><dt className="text-faint">Merchants</dt><dd><input aria-label="Merchant restrictions" value={rule.merchantRestrictions} onChange={(event) => updateRule("merchantRestrictions", event.target.value)} className={fieldClass} /></dd></div><div><dt className="text-faint">Time restrictions</dt><dd><input aria-label="Time restrictions" value={rule.timeRestrictions ?? ""} placeholder="None" onChange={(event) => updateRule("timeRestrictions", event.target.value || null)} className={fieldClass} /></dd></div><div><dt className="text-faint">Confidence</dt><dd><select aria-label="Confidence" value={rule.confidence} onChange={(event) => updateRule("confidence", event.target.value as SpendingPolicy["confidence"])} className={fieldClass}><option>High</option><option>Medium</option><option>Low</option></select></dd></div><div><dt className="text-faint">Currency</dt><dd><select aria-label="Currency" value={rule.businessCurrency} onChange={() => undefined} className={fieldClass}><option>GBP</option></select></dd></div><div className="col-span-2"><dt className="text-faint">Assumptions</dt><dd><textarea aria-label="Assumptions" value={rule.assumptions.join("\n")} onChange={(event) => updateRule("assumptions", event.target.value.split("\n").slice(0, 5))} rows={Math.max(2, rule.assumptions.length)} placeholder="None" className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Rule ID</dt><dd className="mt-1.5 text-ink">{rule.policyId}</dd></div>{rule.settlementGuard && <><div><dt className="text-faint">Enforcement</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.enforcement === "onchain" ? "Onchain spending rule" : "Demo environment"}</dd></div>{rule.settlementGuard.enforcement === "onchain" && <><div><dt className="text-faint">Settlement guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.maxPerTransactionUSDC} USDC per payment</dd></div><div><dt className="text-faint">Period guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.periodLimitUSDC} USDC per 30-day period</dd></div><div><dt className="text-faint">Contract</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.contractAddress)}</dd></div><div><dt className="text-faint">Transaction</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.transactionHash)}</dd></div>{rule.settlementGuard.explorerUrl && <div><a href={rule.settlementGuard.explorerUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">View transaction</a></div>}</>}</>}</dl>
+          <dl className="grid grid-cols-2 gap-x-12 gap-y-5 border-t border-border py-6 text-[10px]"><div><dt className="text-faint">Description</dt><dd><textarea aria-label="Rule description" value={rule.description} onChange={(event) => updateRule("description", event.target.value)} rows={2} className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Limit cadence</dt><dd><select aria-label="Limit cadence" value={rule.limitType} onChange={(event) => updateRule("limitType", event.target.value as SpendingPolicy["limitType"])} className={fieldClass}><option value="monthly">Monthly</option><option value="per_transaction">Per transaction</option></select></dd></div><div><dt className="text-faint">Approval threshold</dt><dd><input aria-label="Approval threshold" type="number" disabled={!rule.approvalRequired} value={rule.approvalThreshold ?? ""} onChange={(event) => updateRule("approvalThreshold", Number(event.target.value))} className={`${fieldClass} disabled:opacity-40`} /></dd></div><div><dt className="text-faint">Recurring purchases</dt><dd><select aria-label="Recurring purchases" value={rule.recurringAllowed ? "allowed" : "not_allowed"} onChange={(event) => updateRule("recurringAllowed", event.target.value === "allowed")} className={fieldClass}><option value="allowed">Allowed</option><option value="not_allowed">Not allowed</option></select></dd></div><div><dt className="text-faint">Merchants</dt><dd><input aria-label="Merchant restrictions" value={rule.merchantRestrictions} onChange={(event) => updateRule("merchantRestrictions", event.target.value)} className={fieldClass} /></dd></div><div><dt className="text-faint">Time restrictions</dt><dd><input aria-label="Time restrictions" value={rule.timeRestrictions ?? ""} placeholder="None" onChange={(event) => updateRule("timeRestrictions", event.target.value || null)} className={fieldClass} /></dd></div><div><dt className="text-faint">Confidence</dt><dd><select aria-label="Confidence" value={rule.confidence} onChange={(event) => updateRule("confidence", event.target.value as SpendingPolicy["confidence"])} className={fieldClass}><option>High</option><option>Medium</option><option>Low</option></select></dd></div><div><dt className="text-faint">Currency</dt><dd><select aria-label="Currency" value={rule.businessCurrency} onChange={() => undefined} className={fieldClass}><option>GBP</option></select></dd></div><div className="col-span-2"><dt className="text-faint">Assumptions</dt><dd><textarea aria-label="Assumptions" value={rule.assumptions.join("\n")} onChange={(event) => updateRule("assumptions", event.target.value.split("\n").slice(0, 5))} rows={Math.max(2, rule.assumptions.length)} placeholder="None" className={`${fieldClass} resize-none`} /></dd></div><div><dt className="text-faint">Rule ID</dt><dd className="mt-1.5 text-ink">{rule.policyId}</dd></div>{rule.settlementGuard && <><div><dt className="text-faint">Enforcement</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.enforcement === "onchain" ? "Onchain spending rule" : "Local workflow"}</dd></div>{rule.settlementGuard.enforcement === "onchain" && <><div><dt className="text-faint">Settlement guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.maxPerTransactionUSDC} USDC per payment</dd></div><div><dt className="text-faint">Period guard</dt><dd className="mt-1.5 text-ink">{rule.settlementGuard.periodLimitUSDC} USDC per 30-day period</dd></div><div><dt className="text-faint">Contract</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.contractAddress)}</dd></div><div><dt className="text-faint">Transaction</dt><dd className="mt-1.5 text-ink">{shortenTransactionHash(rule.settlementGuard.transactionHash)}</dd></div>{rule.settlementGuard.explorerUrl && <div><a href={rule.settlementGuard.explorerUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">View transaction</a></div>}</>}</>}</dl>
         </details>
 
-        <div className="mt-8 flex items-start justify-between gap-8"><div aria-live="polite">{rule.active && <p className="text-[11px] text-success">Rule active</p>}{ruleError && ruleError.split("\n").map((line) => <p key={line} className="text-[10px] leading-5 text-[#9a4d45]">{line}</p>)}</div>{!rule.active && <Button onClick={activateRule} disabled={Boolean(operation)} variant="primary" className="h-11 px-6">{operation === "publish" ? "Activating rule…" : "Activate rule"}</Button>}</div>
+        <div className="mt-8 flex items-start justify-between gap-8"><div aria-live="polite">{rule.active && <p className="text-[11px] text-success">Active on Arc Testnet</p>}{ruleError && ruleError.split(/\r?\n/).map((line, index) => <p key={`rule-error-${index}`} className="text-[10px] leading-5 text-[#9a4d45]">{line || "\u00A0"}</p>)}{activationHash&&<div className="mt-2 flex items-center gap-4"><a href={`${ARC_TESTNET.explorerUrl}/tx/${activationHash}`} target="_blank" rel="noreferrer" className="text-[10px] text-accent">View on ArcScan</a>{!rule.active&&<button onClick={checkActivationStatus} disabled={Boolean(operation)} className="text-[10px] text-muted hover:text-ink">Check status</button>}</div>}</div>{!rule.active && <div className="flex gap-3">{!preparedActivation&&!activationHash?<Button onClick={activateRule} disabled={Boolean(operation)} variant="primary" className="h-11 px-6">{operation === "publish" ? "Preparing…" : "Activate on Arc"}</Button>:preparedActivation&&!activationHash?<><Button onClick={()=>setPreparedActivation(null)} disabled={Boolean(operation)}>Cancel</Button><Button onClick={confirmActivation} disabled={Boolean(operation)} variant="primary" className="h-11 px-6">{operation === "publish" ? "Waiting for wallet…" : "Confirm activation in wallet"}</Button></>:null}</div>}</div>
+        {preparedActivation&&!activationHash&&<dl className="mt-6 divide-y divide-border border-y border-border text-[10px]">{[["Sender",preparedActivation.sender],["Contract",ARC_POLICY_CONTRACT],["Function","setPolicy(bytes32,uint256,uint256,bool)"],["Policy key",preparedActivation.policyKey],["maxPerTransaction",preparedActivation.maximum.toString()],["periodLimit",preparedActivation.periodLimit.toString()],["Gas estimate",preparedActivation.gas.toString()],["Gas price",`${preparedActivation.gasPrice} wei`],["Estimated cost",preparedActivation.estimatedCost]].map(([label,value])=><div key={label} className="grid grid-cols-[180px_1fr] gap-6 py-4"><dt className="text-muted">{label}</dt><dd className="break-all">{value}</dd></div>)}</dl>}
       </section>}
 
       <RulesArcPolicyStatus />
@@ -492,33 +596,63 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
   );
 }
 
+function AuthenticatedFooter({ wallet }: { wallet: AppWallet }) {
+  const contactEmail = process.env.NEXT_PUBLIC_WITHIN_CONTACT_EMAIL || "hello@within.finance";
+  return <footer className="mx-10 grid grid-cols-3 items-center border-t border-border py-5 text-[9px] text-faint">
+    <span>© 2026 Within</span>
+    <a href={ARC_TESTNET.explorerUrl} target="_blank" rel="noopener noreferrer" aria-label="Built on Arc Testnet (opens in a new tab)" className="flex items-center justify-center gap-1.5 transition-colors hover:text-ink">Built on Arc Testnet<ExternalLinkIcon className="size-2.5"/></a>
+    <nav aria-label="Application footer" className="flex items-center justify-end gap-3">
+      <span>Status · Arc Testnet · {wallet.address && isArcTestnet(wallet.chainId) ? "Connected" : "Disconnected"}</span>
+      <a href="/about" className="transition-colors hover:text-ink">About</a>
+      <a href={`mailto:${contactEmail}`} className="transition-colors hover:text-ink">Contact</a>
+    </nav>
+  </footer>;
+}
+
 export default function WithinApp() {
   const router = useRouter();
   const pathname = usePathname();
+  const walletSession = useWallet();
   const [demoState, setDemoStateInternal] = useState<DemoState>(() => createCleanDemoState());
   const [hydrated, setHydrated] = useState(false);
   const [introMode, setIntroMode] = useState<"loading" | "full" | "direct" | "ready">("loading");
   const [resetToast, setResetToast] = useState(false);
   const [decision, setDecision] = useState<DecisionState>("idle");
   const [decisionToast, setDecisionToast] = useState<"approved" | "declined" | null>(null);
+  const appWallet = walletSession.wallet;
+  const walletSessionVersion = walletSession.sessionVersion;
+  const walletBusy = walletSession.busy;
   const page = demoState.page;
+
+  async function connectAppWallet() {
+    await walletSession.connect();
+  }
+
+  async function switchAppNetwork() {
+    await walletSession.switchNetwork();
+  }
+
+  async function switchAppAccount() {
+    await walletSession.switchAccount();
+  }
+
+  async function disconnectAppWallet() {
+    await walletSession.disconnect();
+  }
 
   useEffect(() => {
     const restoration = window.setTimeout(() => {
       const restored = demoModeEnabled ? restoreDemoState(sessionStorage.getItem(DEMO_STORAGE_KEY)) : createCleanDemoState();
+      restored.signedIn = true;
+      restored.wallet = { address: null, chainId: null };
       if (pathname === "/app/credit") restored.page = "Credit";
       setDemoStateInternal(restored);
-      if (restored.signedIn) {
-        if (sessionStorage.getItem(WITHIN_ENTRY_SOURCE_KEY) === "connect") {
-          setIntroMode("full");
-        } else setIntroMode("direct");
-      }
+      if (sessionStorage.getItem(WITHIN_ENTRY_SOURCE_KEY) === "connect") setIntroMode("full");
+      else setIntroMode("direct");
       setHydrated(true);
     }, 0);
     return () => window.clearTimeout(restoration);
   }, [pathname]);
-
-  useEffect(() => { if (hydrated && !demoState.signedIn) router.replace("/connect"); }, [demoState.signedIn, hydrated, router]);
 
   useEffect(() => {
     if (demoModeEnabled && hydrated) sessionStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoState));
@@ -562,21 +696,22 @@ export default function WithinApp() {
   function completePayment(result: PaymentResult) { const id = demoState.dashboard.selectedApprovalId; if (!id || !result.success) return; setDemoState((state) => completeApprovalPayment(state, id, result)); setDecisionToast("approved"); window.setTimeout(() => setDecisionToast(null), 3000); }
   function declineApproval() { const id = demoState.dashboard.selectedApprovalId; if (!id || decision !== "idle") return; setDecision("declining"); window.setTimeout(() => { setDemoState((state) => { const approval = state.approvals.find((item) => item.id === id); if (!approval || approval.status === "Declined") return state; return { ...state, approvals: state.approvals.map((item) => item.id === id ? { ...item, status: "Declined" } : item), dashboard: { ...state.dashboard, pendingCount: Math.max(0, state.dashboard.pendingCount - 1), activity: state.dashboard.activity.map((item) => item.employee === approval.employeeName && item.merchant === approval.merchant ? { ...item, status: "Declined" } : item) } }; }); setDecision("declined"); setDecisionToast("declined"); window.setTimeout(() => { closeApproval(); setDecision("idle"); }, 900); }, 500); }
 
-  if (!hydrated || !demoState.signedIn) return <div className="min-h-screen bg-canvas" />;
+  if (!walletSession.ready || !hydrated) return <div className="min-h-screen bg-canvas" />;
 
   const selectedApproval = demoState.approvals.find((item) => item.id === demoState.dashboard.selectedApprovalId) ?? null;
 
   return (
     <div className={`min-h-screen min-w-[1024px] bg-canvas text-ink ${introMode !== "ready" ? `app-entry app-entry-${introMode}` : ""}`}>
       <Sidebar page={page} onNavigate={setPage} />
-      <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>
-      <TopNavigation page={page} onReset={resetDemo} onNavigate={setPage} onSignOut={() => setDemoState((state) => ({ ...state, signedIn: false }))} />
-      <main className="ml-[224px] min-h-screen pt-[72px]">
-        <div className="px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={demoState.idempotency.publish} demoState={demoState} setDemoState={setDemoState} /> : page === "Credit" ? <CreditPage state={demoState} setState={setDemoState} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => setDemoState((state) => ({ ...state, signedIn: false }))} />}</div>
+      {page !== "Credit" && <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>}
+      <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
+      <main className="ml-[224px] flex min-h-screen flex-col pt-[72px]">
+        <div className="flex-1 px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} wallet={appWallet} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={`${demoState.idempotency.publish}-${walletSessionVersion}`} demoState={demoState} setDemoState={setDemoState} /> : page === "Credit" ? <EmployeeCreditPage key={walletSessionVersion} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />}</div>
+        <AuthenticatedFooter wallet={appWallet}/>
       </main>
       {selectedApproval && demoState.dashboard.drawerOpen && (selectedApproval.approvalType === "Treasury multisig" ? <MultisigApprovalDrawer approval={selectedApproval} state={demoState} setState={setDemoState} onClose={closeApproval}/> : <ApprovalDrawer approval={selectedApproval} decision={decision} completedPayment={demoState.dashboard.paymentResult} paymentIdempotencyKey={`${selectedApproval.id}-${demoState.idempotency.payment}`} onPaymentComplete={completePayment} onDecline={declineApproval} onClose={() => { if (decision === "idle") closeApproval(); }} />)}
       {decisionToast && <div role="status" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)]">Purchase {decisionToast}</div>}
-      {resetToast && <div role="status" aria-live="polite" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)] animate-toast-in">Demo reset</div>}
+      {resetToast && <div role="status" aria-live="polite" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)] animate-toast-in">Workspace reset</div>}
       {(introMode === "direct" || introMode === "full") && <AppEntryReveal mode={introMode} onComplete={() => { sessionStorage.removeItem(WITHIN_ENTRY_SOURCE_KEY); sessionStorage.setItem(WITHIN_APP_INTRO_SEEN_KEY,"true"); setIntroMode("ready"); }}/>} 
     </div>
   );

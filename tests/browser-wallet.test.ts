@@ -1,95 +1,29 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { connectBrowserWallet, discoverBrowserWallets, restoreBrowserWallet, SELECTED_WALLET_SESSION_KEY, subscribeWallet } from "../src/lib/arc/browser-wallet.ts";
+import { readFile } from "node:fs/promises";
+import test, { beforeEach } from "node:test";
+import {
+  clearSelectedWallet,
+  connectBrowserWallet,
+  discardLegacyWalletPersistence,
+  disconnectBrowserWallet,
+  discoverMetaMask,
+  restoreBrowserWallet,
+  subscribeWallet,
+  subscribeWalletRecovery,
+  switchMetaMaskAccount,
+} from "../src/lib/arc/browser-wallet.ts";
 import type { BrowserEthereumProvider } from "../src/lib/arc/network.ts";
 
-const address = "0x1234567890123456789012345678901234567890";
+const accountOne = "0x1234567890123456789012345678901234567890";
+const accountTwo = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
 
-test("the explicitly selected provider is reused for account and chain requests", async () => {
-  const methods: string[] = [];
-  const provider = { request: async ({ method }: { method: string }) => {
-    methods.push(method);
-    return method === "eth_requestAccounts" ? [address] : "0x4CEF52";
-  } };
-  const connected = await connectBrowserWallet({ info: { uuid: "chosen", name: "Chosen wallet" }, provider });
-  assert.equal(connected.provider, provider);
-  assert.equal(connected.address, address);
-  assert.equal(connected.chainId, "0x4CEF52");
-  assert.deepEqual(methods, ["eth_requestAccounts", "eth_chainId"]);
-});
-
-test("wallet events update accounts and chain, and disconnect clears only wallet state", () => {
-  const listeners = new Map<string, (value: unknown) => void>();
-  const removed: string[] = [];
-  const provider: BrowserEthereumProvider = {
-    request: async () => null,
-    on: (event, listener) => { listeners.set(event, listener); },
-    removeListener: (event) => { removed.push(event); },
-  };
-  const states: Array<{ address: string | null; chainId: string | null }> = [];
-  let disconnected = false;
-  const unsubscribe = subscribeWallet(provider, { address, chainId: "0x1" }, (state) => states.push(state), () => { disconnected = true; });
-  listeners.get("accountsChanged")?.(["0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"]);
-  listeners.get("chainChanged")?.("0x4CEF52");
-  listeners.get("disconnect")?.({ code: 4900 });
-  assert.deepEqual(states, [
-    { address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", chainId: "0x1" },
-    { address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", chainId: "0x4CEF52" },
-    { address: null, chainId: null },
-  ]);
-  assert.equal(disconnected, true);
-  unsubscribe();
-  assert.deepEqual(removed, ["accountsChanged", "chainChanged", "disconnect"]);
-});
-
-test("empty accounts return the connection to a disconnected state", () => {
-  const listeners = new Map<string, (value: unknown) => void>();
-  const provider: BrowserEthereumProvider = { request: async () => null, on: (event, listener) => { listeners.set(event, listener); } };
-  let latest = { address, chainId: "0x4CEF52" } as { address: string | null; chainId: string | null };
-  subscribeWallet(provider, latest, (state) => { latest = state; });
-  listeners.get("accountsChanged")?.([]);
-  assert.deepEqual(latest, { address: null, chainId: "0x4CEF52" });
-});
-
-test("an authorised selected wallet is restored without requesting permission", async () => {
-  const methods: string[] = [];
-  const provider: BrowserEthereumProvider = { request: async ({ method }) => {
-    methods.push(method);
-    if (method === "eth_accounts") return [address];
-    if (method === "eth_chainId") return "0x4CEF52";
-    throw new Error(`Unexpected method ${method}`);
-  } };
-  const target = new EventTarget() as EventTarget & { ethereum: BrowserEthereumProvider; setTimeout: typeof setTimeout };
-  target.ethereum = provider;
-  target.setTimeout = setTimeout;
-  const values = new Map<string, string>([[SELECTED_WALLET_SESSION_KEY, "window.ethereum"]]);
-  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } };
-  const globals = globalThis as unknown as { window?: typeof target; sessionStorage?: typeof storage };
-  const oldWindow = globals.window;
-  const oldStorage = globals.sessionStorage;
-  globals.window = target;
-  globals.sessionStorage = storage;
-  try {
-    const restored = await restoreBrowserWallet();
-    assert.equal(restored?.provider, provider);
-    assert.equal(restored?.address, address);
-    assert.deepEqual(methods, ["eth_accounts", "eth_chainId"]);
-  } finally {
-    if (oldWindow) globals.window = oldWindow; else delete globals.window;
-    if (oldStorage) globals.sessionStorage = oldStorage; else delete globals.sessionStorage;
-  }
-});
-
-test("EIP-6963 discovery keeps multiple injected providers distinct", async () => {
-  const first: BrowserEthereumProvider = { request: async () => null };
-  const second: BrowserEthereumProvider = { request: async () => null };
+function installBrowser(
+  announcements: Array<{ info: { uuid: string; name: string; rdns: string }; provider: BrowserEthereumProvider }>,
+) {
   const target = new EventTarget() as EventTarget & { setTimeout: typeof setTimeout };
   target.setTimeout = setTimeout;
   target.addEventListener("eip6963:requestProvider", () => {
-    for (const detail of [
-      { info: { uuid: "wallet-one", name: "Wallet One" }, provider: first },
-      { info: { uuid: "wallet-two", name: "Wallet Two" }, provider: second },
-    ]) {
+    for (const detail of announcements) {
       const event = new Event("eip6963:announceProvider");
       Object.defineProperty(event, "detail", { value: detail });
       target.dispatchEvent(event);
@@ -98,16 +32,209 @@ test("EIP-6963 discovery keeps multiple injected providers distinct", async () =
   const globals = globalThis as unknown as { window?: typeof target };
   const oldWindow = globals.window;
   globals.window = target;
+  return () => {
+    if (oldWindow) globals.window = oldWindow; else delete globals.window;
+  };
+}
+
+beforeEach(() => clearSelectedWallet());
+
+test("legacy wallet selection storage is removed without restoring an account", async () => {
+  const values = new Map([["within:selected-wallet", "cached-provider"]]);
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+  const globals = globalThis as unknown as { window?: EventTarget; sessionStorage?: typeof storage };
+  const oldWindow = globals.window;
+  const oldStorage = globals.sessionStorage;
+  globals.window = new EventTarget();
+  globals.sessionStorage = storage;
   try {
-    const wallets = await discoverBrowserWallets(0);
-    assert.deepEqual(wallets.map((wallet) => wallet.info.uuid), ["wallet-one", "wallet-two"]);
+    discardLegacyWalletPersistence();
+    assert.equal(storage.getItem("within:selected-wallet"), null);
+    assert.equal(await restoreBrowserWallet(), null);
   } finally {
     if (oldWindow) globals.window = oldWindow; else delete globals.window;
+    if (oldStorage) globals.sessionStorage = oldStorage; else delete globals.sessionStorage;
   }
 });
 
+test("connect uses permission, request, verification, and chain reads on the exact MetaMask provider", async () => {
+  const methods: string[] = [];
+  const provider: BrowserEthereumProvider = { request: async ({ method }) => {
+    methods.push(method);
+    if (method === "wallet_requestPermissions") return [{ parentCapability: "eth_accounts" }];
+    if (method === "eth_requestAccounts" || method === "eth_accounts") return [accountOne];
+    if (method === "eth_chainId") return "0x4CEF52";
+    throw new Error(`Unexpected method ${method}`);
+  } };
+  const detail = { info: { uuid: "metamask", name: "MetaMask", rdns: "io.metamask" }, provider };
+  const connected = await connectBrowserWallet(detail);
+  assert.equal(connected.provider, provider);
+  assert.equal(connected.address, accountOne);
+  assert.deepEqual(methods, ["wallet_requestPermissions", "eth_requestAccounts", "eth_accounts", "eth_chainId"]);
+  assert.equal(methods.some((method) => method === "eth_sendTransaction" || method.includes("sign")), false);
+});
+
+test("initial load ignores previously available accounts and performs no provider reads", async () => {
+  const methods: string[] = [];
+  const provider: BrowserEthereumProvider = { request: async ({ method }) => {
+    methods.push(method);
+    if (method === "eth_accounts") return [];
+    if (method === "eth_chainId") return "0x4CEF52";
+    throw new Error(`Unexpected method ${method}`);
+  } };
+  const restore = installBrowser([{ info: { uuid: "fresh-metamask", name: "MetaMask", rdns: "io.metamask" }, provider }]);
+  try {
+    const restored = await restoreBrowserWallet();
+    assert.equal(restored, null);
+    assert.deepEqual(methods, []);
+  } finally {
+    restore();
+  }
+});
+
+test("only the EIP-6963 io.metamask provider is selected", async () => {
+  const other: BrowserEthereumProvider = { request: async () => null };
+  const metamask: BrowserEthereumProvider = { request: async () => null };
+  const restore = installBrowser([
+    { info: { uuid: "other", name: "Other Wallet", rdns: "com.other" }, provider: other },
+    { info: { uuid: "metamask", name: "MetaMask", rdns: "io.metamask" }, provider: metamask },
+  ]);
+  try {
+    assert.equal((await discoverMetaMask(0))?.provider, metamask);
+  } finally {
+    restore();
+  }
+});
+
+test("account events replace the previous account, clear prepared state, and empty accounts disconnect", () => {
+  const listeners = new Map<string, (value: unknown) => void>();
+  const removed: string[] = [];
+  const provider: BrowserEthereumProvider = {
+    request: async () => null,
+    on: (event, listener) => { assert.equal(listeners.has(event), false); listeners.set(event, listener); },
+    removeListener: (event) => { removed.push(event); },
+  };
+  let latest = { address: accountOne, chainId: "0x4CEF52" } as { address: string | null; chainId: string | null };
+  let preparedClears = 0;
+  let disconnects = 0;
+  const unsubscribe = subscribeWallet(provider, latest, (state) => { latest = state; }, () => { disconnects += 1; }, () => { preparedClears += 1; });
+  listeners.get("accountsChanged")?.([accountTwo]);
+  assert.deepEqual(latest, { address: accountTwo, chainId: "0x4CEF52" });
+  assert.equal(preparedClears, 1);
+  listeners.get("accountsChanged")?.([]);
+  assert.deepEqual(latest, { address: null, chainId: "0x4CEF52" });
+  assert.equal(preparedClears, 2);
+  assert.equal(disconnects, 1);
+  unsubscribe();
+  assert.deepEqual(removed, ["accountsChanged", "chainChanged", "disconnect"]);
+});
+
+test("focus and visible-tab recovery reread the live provider without duplicate listeners", () => {
+  const windowTarget = new EventTarget();
+  const documentTarget = new EventTarget() as EventTarget & { visibilityState: string };
+  documentTarget.visibilityState = "visible";
+  const globals = globalThis as unknown as { window?: EventTarget; document?: typeof documentTarget };
+  const oldWindow = globals.window;
+  const oldDocument = globals.document;
+  globals.window = windowTarget;
+  globals.document = documentTarget;
+  let refreshes = 0;
+  try {
+    const unsubscribe = subscribeWalletRecovery(() => { refreshes += 1; });
+    windowTarget.dispatchEvent(new Event("focus"));
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(refreshes, 2);
+    unsubscribe();
+    windowTarget.dispatchEvent(new Event("focus"));
+    assert.equal(refreshes, 2);
+  } finally {
+    if (oldWindow) globals.window = oldWindow; else delete globals.window;
+    if (oldDocument) globals.document = oldDocument; else delete globals.document;
+  }
+});
+
+test("switch account requests MetaMask permission then verifies eth_accounts", async () => {
+  const methods: string[] = [];
+  const provider: BrowserEthereumProvider = { request: async ({ method }) => {
+    methods.push(method);
+    if (method === "wallet_requestPermissions") return [];
+    if (method === "eth_requestAccounts" || method === "eth_accounts") return [accountTwo];
+    if (method === "eth_chainId") return "0x4CEF52";
+    throw new Error(`Unexpected method ${method}`);
+  } };
+  const detail = { info: { uuid: "metamask", name: "MetaMask", rdns: "io.metamask" }, provider };
+  assert.equal((await switchMetaMaskAccount(detail)).address, accountTwo);
+  assert.deepEqual(methods, ["wallet_requestPermissions", "eth_requestAccounts", "eth_accounts", "eth_chainId"]);
+});
+
+test("disconnect clears only the in-memory session and never calls the provider", async () => {
+  const methods: string[] = [];
+  const provider: BrowserEthereumProvider = { request: async ({ method }) => { methods.push(method); return null; } };
+  const detail = { info: { uuid: "metamask", name: "MetaMask", rdns: "io.metamask" }, provider };
+  assert.equal(await disconnectBrowserWallet(detail), false);
+  assert.deepEqual(methods, []);
+  assert.equal(await restoreBrowserWallet(), null);
+});
+
 test("browser wallet helpers are safe during server rendering", async () => {
-  const walletModule = await import("../src/lib/arc/browser-wallet.ts");
-  assert.deepEqual(await walletModule.discoverBrowserWallets(), []);
-  assert.equal(await walletModule.restoreBrowserWallet(), null);
+  assert.equal(await restoreBrowserWallet(), null);
+});
+
+test("explicit connection survives SPA use but a fresh in-memory session is disconnected", async () => {
+  const provider: BrowserEthereumProvider = { request: async ({ method }) => {
+    if (method === "wallet_requestPermissions") return [];
+    if (method === "eth_requestAccounts" || method === "eth_accounts") return [accountOne];
+    if (method === "eth_chainId") return "0x4CEF52";
+    throw new Error(`Unexpected method ${method}`);
+  } };
+  const detail = { info: { uuid: "metamask", name: "MetaMask", rdns: "io.metamask" }, provider };
+  await connectBrowserWallet(detail);
+  assert.equal((await restoreBrowserWallet())?.address, accountOne);
+  clearSelectedWallet();
+  assert.equal(await restoreBrowserWallet(), null);
+});
+
+test("shared wallet state starts disconnected and only explicit connect can populate it", async () => {
+  const [shell, connectPage, walletClient, walletProvider, rootLayout] = await Promise.all([
+    readFile(new URL("../src/components/within-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/connect/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/arc/browser-wallet.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/wallet-provider.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/layout.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(walletProvider, /const disconnectedWallet: SharedWallet = \{/);
+  assert.match(walletProvider, /address: null/);
+  assert.match(walletProvider, /chainId: null/);
+  assert.match(walletProvider, /provider: null/);
+  assert.match(rootLayout, /<WalletProvider>\{children\}<\/WalletProvider>/);
+  assert.match(connectPage, /const walletSession = useWallet\(\)/);
+  assert.match(shell, /const walletSession = useWallet\(\)/);
+  assert.match(shell, /!connected \? \(/);
+  assert.match(shell, /aria-label="Connect wallet"/);
+  assert.match(walletClient, /wallet_requestPermissions/);
+  assert.match(walletClient, /eth_requestAccounts/);
+  assert.match(walletClient, /return currentWalletSession/);
+  assert.doesNotMatch(walletClient, /sessionStorage\.setItem/);
+});
+
+test("workspace navigation preserves the shared in-memory wallet without disconnecting", async () => {
+  const [connectPage, walletProvider, shell] = await Promise.all([
+    readFile(new URL("../src/app/connect/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/wallet-provider.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/within-app.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(connectPage, /const continueToWorkspace = \(\) => router\.push\("\/app"\)/);
+  assert.doesNotMatch(connectPage, /window\.location|location\.href|document\.location|router\.refresh|<a[^>]+href="\/app"/);
+  assert.equal((connectPage.match(/onClick=\{continueToWorkspace\}/g) ?? []).length, 5);
+  assert.doesNotMatch(connectPage, /onClick=\{\(\)=>enter|const enter|isNorthstarEmail/);
+  assert.match(walletProvider, /<WalletContext\.Provider value=\{value\}>\{children\}<\/WalletContext\.Provider>/);
+  assert.doesNotMatch(shell, /router\.replace\("\/connect"\)/);
+  assert.match(shell, /if \(!walletSession\.ready \|\| !hydrated\)/);
+  assert.doesNotMatch(shell, /if \(!walletSession\.ready \|\| !hydrated \|\| !demoState\.signedIn\)/);
 });

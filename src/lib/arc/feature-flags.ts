@@ -16,4 +16,5 @@ export const ARC_PUBLIC_ADDRESSES = {
   multisig: process.env.NEXT_PUBLIC_WITHIN_MULTISIG_ADDRESS || "",
   policyExecutor: process.env.NEXT_PUBLIC_WITHIN_POLICY_EXECUTOR_ADDRESS || "",
   creditFacility: process.env.NEXT_PUBLIC_WITHIN_CREDIT_FACILITY_ADDRESS || "",
+  employeeCredit: process.env.NEXT_PUBLIC_WITHIN_EMPLOYEE_CREDIT_ADDRESS || "",
 } as const;

@@ -1,10 +1,26 @@
 {
   "network": "Arc Testnet",
   "chainId": 5042002,
-  "deployer": "",
+  "deployer": "0xCCE679E826618797208BB1Fba4418481d92fAaD0",
   "contracts": {
     "WithinPolicyExecutor": { "address": "", "deploymentTx": "", "verified": false },
     "WithinMultisigExecutor": { "address": "", "deploymentTx": "", "verified": false },
-    "WithinCreditFacility": { "address": "", "deploymentTx": "", "verified": false }
+    "WithinCreditFacility": { "address": "", "deploymentTx": "", "verified": false },
+    "WithinEmployeeCredit": {
+      "address": "0x20420A38876AC38aEf2d78969E8bD1572fB37794",
+      "deploymentTx": "0xe52fa665f0f4198c8962281096b9dccd9011f322bf4c68d12dc63d823c381240",
+      "deployBlock": 53961878,
+      "gasUsed": 894939,
+      "verified": false,
+      "bytecodeVerified": true,
+      "eligibilityTransactions": [
+        "0xe1dcb630f67d193220e768978f99f8c3410e66d20ee9b931ba4da71a800913ce",
+        "0xc0be0e143a4bd50cc31b3fecedcdf0847df7bf6bbbd1f036de4bc7df6f063582"
+      ],
+      "eligibleEmployees": [
+        "0xCCE679E826618797208BB1Fba4418481d92fAaD0",
+        "0x9ba306481F3e4E719a0152E61AABb54953ec3033"
+      ]
+    }
   }
 }
