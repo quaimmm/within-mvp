@@ -31,6 +31,7 @@ import { SettingsPage } from "@/components/settings-page";
 import { AppEntryReveal, WITHIN_APP_INTRO_SEEN_KEY, WITHIN_ENTRY_SOURCE_KEY } from "@/components/app-entry-reveal";
 import { EmployeeCreditPage } from "@/components/employee-credit-page";
 import { RulesArcPolicyStatus } from "@/components/rules-arc-policy-status";
+import { AskWithinPanel } from "@/components/ask-within-panel";
 import { useWallet } from "@/components/wallet-provider";
 import { restoreBrowserWallet } from "@/lib/arc/browser-wallet";
 import { ARC_POLICY_ACTIVATION_STORAGE_KEY, ARC_POLICY_CONTRACT, confirmPolicyState, confirmPolicyStateForId, preparePolicyActivation, submitPolicyActivation, type PreparedPolicyActivation } from "@/lib/policies/arc-policy-activation";
@@ -376,6 +377,8 @@ function Dashboard({ demoState, wallet, onOpenApproval }: { demoState: DemoState
         <h2 className="mt-4 max-w-2xl text-[42px] font-normal leading-tight tracking-[-0.05em] text-ink">Programmable company spending.</h2>
         <p className="mt-5 max-w-xl text-[12px] leading-6 text-muted">Set spending rules, approve decisions and access employee credit through one clear workspace built on Arc.</p>
       </section>
+
+      <AskWithinPanel state={demoState}/>
 
       <div className="mt-20 border-t border-border pt-8">
         <section>

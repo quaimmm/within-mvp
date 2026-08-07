@@ -18,6 +18,9 @@ export type SharedWallet = {
   chainId: string | null;
   provider: BrowserEthereumProvider | null;
   walletName: string | null;
+  walletId: string | null;
+  walletIcon: string | null;
+  walletRdns: string | null;
 };
 
 type WalletContextValue = {
@@ -26,7 +29,7 @@ type WalletContextValue = {
   connectedThisSession: boolean;
   busy: boolean;
   sessionVersion: number;
-  connect: () => Promise<SharedWallet>;
+  connect: (detail?: ArcWalletProviderDetail) => Promise<SharedWallet>;
   switchAccount: () => Promise<SharedWallet>;
   switchNetwork: () => Promise<string>;
   disconnect: () => Promise<void>;
@@ -36,7 +39,10 @@ const disconnectedWallet: SharedWallet = {
   address: null,
   chainId: null,
   provider: null,
-  walletName: "MetaMask",
+  walletName: null,
+  walletId: null,
+  walletIcon: null,
+  walletRdns: null,
 };
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -95,6 +101,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       chainId: refreshed.chainId,
       provider: refreshed.provider,
       walletName: refreshed.walletName,
+      walletId: refreshed.walletId,
+      walletIcon: refreshed.walletIcon,
+      walletRdns: refreshed.walletRdns,
     });
   }, []);
 
@@ -103,15 +112,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     return subscribeWalletRecovery(() => void refreshLiveWallet());
   }, [refreshLiveWallet, wallet.provider]);
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (detail?: ArcWalletProviderDetail) => {
     setBusy(true);
     try {
-      const connected = await connectBrowserWallet();
+      const connected = await connectBrowserWallet(detail);
       selectedDetailRef.current = {
         info: {
           uuid: connected.walletId ?? "active-metamask",
           name: connected.walletName ?? "MetaMask",
-          rdns: "io.metamask",
+          icon: connected.walletIcon ?? undefined,
+          rdns: connected.walletRdns ?? undefined,
         },
         provider: connected.provider!,
       };
@@ -120,6 +130,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         chainId: connected.chainId,
         provider: connected.provider,
         walletName: connected.walletName,
+        walletId: connected.walletId,
+        walletIcon: connected.walletIcon,
+        walletRdns: connected.walletRdns,
       };
       setWallet(next);
       setConnectedThisSession(true);
@@ -137,7 +150,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         info: {
           uuid: connected.walletId ?? "active-metamask",
           name: connected.walletName ?? "MetaMask",
-          rdns: "io.metamask",
+          icon: connected.walletIcon ?? undefined,
+          rdns: connected.walletRdns ?? undefined,
         },
         provider: connected.provider!,
       };
@@ -146,6 +160,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         chainId: connected.chainId,
         provider: connected.provider,
         walletName: connected.walletName,
+        walletId: connected.walletId,
+        walletIcon: connected.walletIcon,
+        walletRdns: connected.walletRdns,
       };
       setWallet(next);
       setConnectedThisSession(true);
@@ -157,7 +174,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const switchNetwork = useCallback(async () => {
-    if (!walletRef.current.provider) throw new Error("Connect MetaMask before switching networks.");
+    if (!walletRef.current.provider) throw new Error("Connect a wallet before switching networks.");
     setBusy(true);
     try {
       const chainId = await switchToArcTestnet(walletRef.current.provider);

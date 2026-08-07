@@ -46,27 +46,33 @@ async function readProviderState(detail: ArcWalletProviderDetail): Promise<ArcWa
     provider: detail.provider,
     walletName: detail.info.name,
     walletId: detail.info.uuid,
+    walletIcon: detail.info.icon ?? null,
+    walletRdns: detail.info.rdns ?? null,
   };
 }
 
 export async function connectBrowserWallet(detail?: ArcWalletProviderDetail): Promise<ArcWalletState> {
-  const selected = detail?.info.rdns === METAMASK_RDNS ? detail : await discoverMetaMask();
-  if (!selected) throw new Error("MetaMask was not detected.");
-  await selected.provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  const selected = detail ?? await discoverMetaMask();
+  if (!selected) throw new Error("No compatible browser wallet was detected.");
+  if (selected.info.rdns === METAMASK_RDNS) {
+    await selected.provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  }
   await selected.provider.request({ method: "eth_requestAccounts" });
   const connected = await readProviderState(selected);
-  if (!connected.address) throw new Error("MetaMask did not return a connected account.");
+  if (!connected.address) throw new Error(`${selected.info.name} did not return a connected account.`);
   currentWalletSession = connected;
   return connected;
 }
 
 export async function switchMetaMaskAccount(detail?: ArcWalletProviderDetail): Promise<ArcWalletState> {
-  const selected = detail?.info.rdns === METAMASK_RDNS ? detail : await discoverMetaMask();
-  if (!selected) throw new Error("MetaMask was not detected.");
-  await selected.provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  const selected = detail ?? await discoverMetaMask();
+  if (!selected) throw new Error("No compatible browser wallet was detected.");
+  if (selected.info.rdns === METAMASK_RDNS) {
+    await selected.provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  }
   await selected.provider.request({ method: "eth_requestAccounts" });
   const connected = await readProviderState(selected);
-  if (!connected.address) throw new Error("MetaMask did not return a connected account.");
+  if (!connected.address) throw new Error(`${selected.info.name} did not return a connected account.`);
   currentWalletSession = connected;
   return connected;
 }
@@ -76,7 +82,6 @@ export async function restoreBrowserWallet(): Promise<ArcWalletState | null> {
 }
 
 export async function refreshBrowserWallet(detail: ArcWalletProviderDetail): Promise<ArcWalletState> {
-  if (detail.info.rdns !== METAMASK_RDNS) throw new Error("The selected provider is not MetaMask.");
   const refreshed = await readProviderState(detail);
   currentWalletSession = refreshed.address ? refreshed : null;
   return refreshed;

@@ -11,6 +11,8 @@ export type ArcWalletState = {
   provider: BrowserEthereumProvider | null;
   walletName: string | null;
   walletId: string | null;
+  walletIcon: string | null;
+  walletRdns: string | null;
 };
 
 export type SettlementOperationType =

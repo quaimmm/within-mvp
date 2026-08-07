@@ -54,4 +54,3 @@ export function savePurchaseRequest(state: DemoState, form: PurchaseRequestForm,
 }
 
 export function cancelPurchaseRequest(state: DemoState, id: string): DemoState { const item = state.approvals.find((entry) => entry.id === id); if (!item) return state; const approvals = state.approvals.map((entry) => entry.id === id ? { ...entry, requestStatus: "Cancelled" as const } : entry); const next = { ...state, approvals, treasury: { ...state.treasury, requests: state.treasury.requests.filter((entry) => entry.approvalId !== id) }, dashboard: { ...state.dashboard, pendingCount: Math.max(0, state.dashboard.pendingCount - 1) } }; return event(next, `${id}:cancelled`, "Request cancelled", { ...item, status: "Declined" }); }
-export function duplicatePurchaseRequest(state: DemoState, id: string): DemoState { const item = state.approvals.find((entry) => entry.id === id); return item ? savePurchaseRequest(state, formFromApproval(item), undefined, false) : state; }

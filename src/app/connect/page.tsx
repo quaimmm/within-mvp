@@ -6,12 +6,14 @@ import { BrandLogo } from "@/components/brand-logo";
 import { NetworkStatus } from "@/components/network-status";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/components/wallet-provider";
+import { WalletSelector } from "@/components/wallet-selector";
+import { discoverBrowserWallets } from "@/lib/arc/browser-wallet";
+import type { ArcWalletProviderDetail } from "@/lib/arc/types";
 import {
   isArcTestnet,
   providerErrorDetails,
   validateArcRpc,
   walletConnectionDecision,
-  walletConnectionLabel,
   walletErrorMessage,
 } from "@/lib/arc/network";
 import { DEMO_STORAGE_KEY, restoreDemoState } from "@/data/demo-state";
@@ -27,6 +29,9 @@ export default function ConnectPage() {
   const [walletDetails, setWalletDetails] = useState("");
   const [operation, setOperation] = useState<WalletOperation>(null);
   const [rpcReady, setRpcReady] = useState<boolean | null>(null);
+  const [walletOptions, setWalletOptions] = useState<ArcWalletProviderDetail[]>([]);
+  const [scanningWallets, setScanningWallets] = useState(true);
+  const [busyWalletId, setBusyWalletId] = useState<string | null>(null);
 
   useEffect(() => { router.prefetch("/app"); }, [router]);
   useEffect(() => {
@@ -38,24 +43,42 @@ export default function ConnectPage() {
     return () => { active = false; };
   }, []);
 
+  async function scanWallets() {
+    setScanningWallets(true);
+    try {
+      setWalletOptions(await discoverBrowserWallets());
+    } finally {
+      setScanningWallets(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    discoverBrowserWallets()
+      .then((options) => { if (active) setWalletOptions(options); })
+      .finally(() => { if (active) setScanningWallets(false); });
+    return () => { active = false; };
+  }, []);
+
   const continueToWorkspace = () => router.push("/app");
 
-  async function connect() {
+  async function connect(detail?: ArcWalletProviderDetail) {
     setOperation("connecting"); setWalletMessage(""); setWalletDetails("");
+    setBusyWalletId(detail?.info.uuid ?? null);
     try {
-      const connected = await walletSession.connect();
+      const connected = await walletSession.connect(detail);
       setWalletMessage(isArcTestnet(connected.chainId) ? "Arc Testnet connected." : "Connected. Switch to Arc Testnet to participate in treasury approvals.");
     } catch (connectError) {
       setWalletMessage((connectError as { code?: number })?.code === 4001 ? "Wallet connection was cancelled." : walletErrorMessage(connectError, "connect"));
       setWalletDetails(providerErrorDetails(connectError));
-    } finally { setOperation(null); }
+    } finally { setOperation(null); setBusyWalletId(null); }
   }
 
   async function switchAccount() {
     setOperation("connecting"); setWalletMessage(""); setWalletDetails("");
     try {
       await walletSession.switchAccount();
-      setWalletMessage("MetaMask account updated.");
+      setWalletMessage(`${wallet.walletName || "Wallet"} account updated.`);
     } catch (switchError) {
       setWalletMessage((switchError as { code?: number })?.code === 4001 ? "Wallet connection was cancelled." : walletErrorMessage(switchError, "connect"));
       setWalletDetails(providerErrorDetails(switchError));
@@ -76,7 +99,7 @@ export default function ConnectPage() {
 
   async function disconnect() {
     await walletSession.disconnect();
-    setWalletMessage("Disconnected from Within. Remove site access from MetaMask Connected sites if needed.");
+    setWalletMessage("Wallet disconnected from Within for this browser session.");
   }
 
   async function copyAddress() {
@@ -85,7 +108,6 @@ export default function ConnectPage() {
     setWalletMessage("Wallet address copied.");
   }
 
-  const walletButtonLabel = walletConnectionLabel(wallet.address, wallet.chainId, operation);
   const walletDecision = walletConnectionDecision(wallet.address, wallet.chainId);
 
   return <main className="min-h-screen bg-canvas px-6 py-10 text-ink">
@@ -107,18 +129,19 @@ export default function ConnectPage() {
           </section>
           <section className="rounded-[18px] border border-border bg-white p-7">
             <div className="flex items-start justify-between gap-4">
-              <div><p className="text-[9px] uppercase tracking-[.12em] text-faint">Wallet connection</p><h2 className="mt-4 text-[20px] tracking-[-.035em]">MetaMask</h2></div>
+              <div><p className="text-[9px] uppercase tracking-[.12em] text-faint">Wallet connection</p><h2 className="mt-4 text-[20px] tracking-[-.035em]">Choose your wallet</h2></div>
               <NetworkStatus address={wallet.address} chainId={wallet.chainId}/>
             </div>
             <dl className="mt-6 divide-y divide-border border-y border-border text-[10px]">
-              <div className="flex justify-between gap-8 py-4"><dt className="text-muted">Wallet</dt><dd>{wallet.walletName || "MetaMask"}</dd></div>
+              <div className="flex justify-between gap-8 py-4"><dt className="text-muted">Wallet</dt><dd>{wallet.walletName || "Not selected"}</dd></div>
               <div className="flex justify-between gap-8 py-4"><dt className="text-muted">Connected account</dt><dd className="max-w-[280px] break-all text-right">{wallet.address || "Disconnected"}</dd></div>
               <div className="flex justify-between gap-8 py-4"><dt className="text-muted">Network</dt><dd>{wallet.address ? isArcTestnet(wallet.chainId) ? "Arc Testnet" : "Wrong network" : "Not connected"}</dd></div>
             </dl>
+            <WalletSelector wallets={walletOptions} connectedWalletId={wallet.walletId} busyWalletId={busyWalletId} scanning={scanningWallets} onSelect={(detail) => void connect(detail)} onRescan={() => void scanWallets()}/>
             <div className="mt-6 flex flex-wrap gap-3">
-              {!walletDecision.connected && <Button variant="primary" onClick={connect} disabled={operation!==null}>{walletButtonLabel}</Button>}
+              {!walletDecision.connected && walletOptions.length === 0 && !scanningWallets && <Button variant="primary" onClick={() => void scanWallets()} disabled={operation!==null}>Rescan wallets</Button>}
               {walletDecision.connected && <>
-                <Button onClick={switchAccount} disabled={operation!==null}>Switch MetaMask account</Button>
+                <Button onClick={switchAccount} disabled={operation!==null}>Switch {wallet.walletName || "wallet"} account</Button>
                 {walletDecision.onArcTestnet ? <Button variant="primary" onClick={continueToWorkspace}>Continue to workspace</Button> : <>
                   <Button variant="primary" onClick={switchNetwork} disabled={operation!==null}>{operation==="switching"?"Switching network…":"Switch to Arc Testnet"}</Button>
                   <Button onClick={continueToWorkspace}>Continue to workspace</Button>

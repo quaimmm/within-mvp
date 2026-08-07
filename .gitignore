@@ -46,3 +46,15 @@ node_modules/
 
 # macOS
 .DS_Store
+
+# local release artifacts
+coverage/
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.patch
+*.diff
+*screenshot*
+*Screenshot*

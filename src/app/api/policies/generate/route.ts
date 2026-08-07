@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       updatedAt: now,
     };
     console.info(`[policies/generate] provider=${generation.provider} outcome=success duration_ms=${Date.now() - startedAt}`);
-    return NextResponse.json<PolicyGenerationResult>({ success: true, provider: generation.provider, policy, explanation: policy.explanation, confidence: policy.confidence, assumptions: policy.assumptions, fallbackOccurred: generation.fallbackOccurred, message: generation.fallbackOccurred ? "Rule created using the local demo engine." : undefined });
+    return NextResponse.json<PolicyGenerationResult>({ success: true, provider: generation.provider, policy, explanation: policy.explanation, confidence: policy.confidence, assumptions: policy.assumptions, fallbackOccurred: generation.fallbackOccurred, message: generation.fallbackOccurred ? "Rule created locally." : undefined });
   } catch (error) {
     const failure = error instanceof PolicyGenerationError ? error : new PolicyGenerationError("unavailable", 500, "Rule could not be created.\nYour description has been preserved.");
     console.warn(`[policies/generate] provider=${selectedProvider} outcome=failed duration_ms=${Date.now() - startedAt} category=${failure.code}`);

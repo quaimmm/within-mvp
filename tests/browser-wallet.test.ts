@@ -6,6 +6,7 @@ import {
   connectBrowserWallet,
   discardLegacyWalletPersistence,
   disconnectBrowserWallet,
+  discoverBrowserWallets,
   discoverMetaMask,
   restoreBrowserWallet,
   subscribeWallet,
@@ -108,6 +109,40 @@ test("only the EIP-6963 io.metamask provider is selected", async () => {
   } finally {
     restore();
   }
+});
+
+test("EIP-6963 discovery returns multiple wallet providers with their metadata", async () => {
+  const first: BrowserEthereumProvider = { request: async () => null };
+  const second: BrowserEthereumProvider = { request: async () => null };
+  const restore = installBrowser([
+    { info: { uuid: "wallet-one", name: "Wallet One", rdns: "com.wallet.one" }, provider: first },
+    { info: { uuid: "wallet-two", name: "Wallet Two", rdns: "com.wallet.two" }, provider: second },
+  ]);
+  try {
+    const wallets = await discoverBrowserWallets(0);
+    assert.deepEqual(wallets.map((wallet) => wallet.info.name), ["Wallet One", "Wallet Two"]);
+    assert.equal(wallets[0]?.provider, first);
+    assert.equal(wallets[1]?.provider, second);
+  } finally {
+    restore();
+  }
+});
+
+test("a selected non-MetaMask EIP-6963 wallet connects through its own provider", async () => {
+  const methods: string[] = [];
+  const provider: BrowserEthereumProvider = { request: async ({ method }) => {
+    methods.push(method);
+    if (method === "eth_requestAccounts" || method === "eth_accounts") return [accountTwo];
+    if (method === "eth_chainId") return "0x4CEF52";
+    throw new Error(`Unexpected method ${method}`);
+  } };
+  const detail = { info: { uuid: "wallet-two", name: "Wallet Two", rdns: "com.wallet.two", icon: "data:image/png;base64,AA==" }, provider };
+  const connected = await connectBrowserWallet(detail);
+  assert.equal(connected.provider, provider);
+  assert.equal(connected.walletId, "wallet-two");
+  assert.equal(connected.walletIcon, detail.info.icon);
+  assert.deepEqual(methods, ["eth_requestAccounts", "eth_accounts", "eth_chainId"]);
+  assert.equal(methods.some((method) => method === "eth_sendTransaction" || method.includes("sign")), false);
 });
 
 test("account events replace the previous account, clear prepared state, and empty accounts disconnect", () => {
