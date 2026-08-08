@@ -168,6 +168,22 @@ test("account events replace the previous account, clear prepared state, and emp
   assert.deepEqual(removed, ["accountsChanged", "chainChanged", "disconnect"]);
 });
 
+test("chain events store a canonical hexadecimal chain ID", () => {
+  const listeners = new Map<string, (value: unknown) => void>();
+  const provider: BrowserEthereumProvider = {
+    request: async () => null,
+    on: (event, listener) => { listeners.set(event, listener); },
+    removeListener: () => undefined,
+  };
+  let latest = { address: accountOne, chainId: "0x1" } as { address: string | null; chainId: string | null };
+  const unsubscribe = subscribeWallet(provider, latest, (state) => { latest = state; });
+  listeners.get("chainChanged")?.("0x004CEF52");
+  assert.equal(latest.chainId, "0x4cef52");
+  listeners.get("chainChanged")?.(5_042_002);
+  assert.equal(latest.chainId, "0x4cef52");
+  unsubscribe();
+});
+
 test("focus and visible-tab recovery reread the live provider without duplicate listeners", () => {
   const windowTarget = new EventTarget();
   const documentTarget = new EventTarget() as EventTarget & { visibilityState: string };

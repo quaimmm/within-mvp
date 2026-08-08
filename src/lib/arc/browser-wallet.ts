@@ -2,7 +2,7 @@
 
 import { isAddress } from "viem";
 import type { ArcWalletProviderDetail, ArcWalletState } from "./types";
-import type { BrowserEthereumProvider } from "./network";
+import { normalizeChainId, type BrowserEthereumProvider } from "./network.ts";
 
 export const METAMASK_RDNS = "io.metamask";
 export type WalletSnapshot = { address: string | null; chainId: string | null };
@@ -38,7 +38,7 @@ export async function discoverMetaMask(timeoutMs = 250): Promise<ArcWalletProvid
 
 async function readProviderState(detail: ArcWalletProviderDetail): Promise<ArcWalletState> {
   const accounts = await detail.provider.request({ method: "eth_accounts" }) as string[];
-  const chainId = await detail.provider.request({ method: "eth_chainId" }) as string;
+  const chainId = normalizeChainId(await detail.provider.request({ method: "eth_chainId" }));
   const address = accounts[0];
   return {
     address: address && isAddress(address) ? address : null,
@@ -114,7 +114,7 @@ export function subscribeWallet(
     if (!address) onDisconnect?.();
   };
   const chainChanged = (value: unknown) => {
-    chainId = typeof value === "string" ? value : null;
+    chainId = typeof value === "string" || typeof value === "number" ? normalizeChainId(value) : null;
     onAccountChanged?.();
     if (currentWalletSession?.provider === provider) currentWalletSession = { ...currentWalletSession, chainId };
     emit();

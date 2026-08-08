@@ -15,6 +15,18 @@ test("Arc Testnet uses the official shared chain configuration", () => {
   assert.equal(shortenAddress("0x1234567890abcdef"), "0x1234…cdef");
 });
 
+test("Arc Testnet detection normalizes equivalent chain ID representations", () => {
+  assert.equal(isArcTestnet("0x4cef52"), true);
+  assert.equal(isArcTestnet("0x4CEF52"), true);
+  assert.equal(isArcTestnet("0x004cef52"), true);
+  assert.equal(isArcTestnet("5042002"), true);
+  assert.equal(isArcTestnet(5_042_002), true);
+  assert.equal(isArcTestnet("0x1"), false);
+  assert.equal(isArcTestnet("not-a-chain"), false);
+  assert.equal(isArcTestnet(null), false);
+  assert.equal(isArcTestnet(undefined), false);
+});
+
 test("ERC-20 USDC accounting remains separate and six-decimal", () => {
   assert.equal(USDC_TOKEN_DECIMALS, 6);
   assert.equal(parseUsdc("25000.123456"), 25_000_123_456n);

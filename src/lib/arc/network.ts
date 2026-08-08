@@ -3,7 +3,7 @@ import { arcTestnet } from "viem/chains";
 
 export const ARC_TESTNET = {
   chainId: arcTestnet.id,
-  chainIdHex: "0x4CEF52",
+  chainIdHex: `0x${arcTestnet.id.toString(16).toUpperCase()}`,
   chainName: arcTestnet.name,
   rpcUrl: arcTestnet.rpcUrls.default.http[0],
   explorerUrl: arcTestnet.blockExplorers.default.url,
@@ -88,8 +88,27 @@ export function walletConnectionDecision(address: string | null, chainId: string
   };
 }
 
-export function isArcTestnet(chainId?: string | null): boolean {
-  return chainId?.toLowerCase() === ARC_TESTNET.chainIdHex.toLowerCase();
+function parseChainId(chainId?: unknown): bigint | null {
+  if (typeof chainId === "number") {
+    return Number.isSafeInteger(chainId) && chainId >= 0 ? BigInt(chainId) : null;
+  }
+  if (typeof chainId !== "string") return null;
+  const value = chainId.trim();
+  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(value)) return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeChainId(chainId?: unknown): string | null {
+  const parsed = parseChainId(chainId);
+  return parsed === null ? null : `0x${parsed.toString(16)}`;
+}
+
+export function isArcTestnet(chainId?: unknown): boolean {
+  return parseChainId(chainId) === BigInt(ARC_TESTNET.chainId);
 }
 
 function isUnknownChain(error: unknown): boolean {
