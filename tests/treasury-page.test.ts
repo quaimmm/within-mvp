@@ -38,9 +38,12 @@ test("Treasury presentation respects existing Arc flags and isolates execution b
   assert.match(presentation, /Pending \/ reserved/);
   assert.match(presentation, /Across networks/);
   assert.match(presentation, /Move money/);
-  assert.match(presentation, /Arc liquidity/);
-  assert.match(presentation, /Company assets/);
-  assert.match(presentation, /Arc settlement/);
+  assert.doesNotMatch(presentation, /arc-liquidity-title/);
+  assert.doesNotMatch(presentation, /Additional Circle liquidity visibility/);
+  assert.doesNotMatch(presentation, /Refresh Unified Balance/);
+  assert.doesNotMatch(presentation, /From funding to settlement/);
+  assert.doesNotMatch(presentation, /Company assets/);
+  assert.doesNotMatch(presentation, /Arc settlement/);
   assert.match(source, /TreasuryOperationsPanel/);
   assert.doesNotMatch(source, /writeContract|sendTransaction|eth_sendTransaction|executePayment|bridgeToArc|spendUnifiedBalance/);
   assert.doesNotMatch(operations, /writeContract|sendTransaction|eth_sendTransaction|bridgeToArc|spendUnifiedBalance|depositUnifiedBalance/);

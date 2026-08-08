@@ -23,7 +23,6 @@ import {
   type TreasuryBridgeExecutionResult,
   type TreasuryBridgeReview,
   type TreasuryCapabilityState,
-  type TreasuryUnifiedBalance,
   type TreasuryWalletContext,
 } from "@/lib/treasury/treasury-app-kit-gateway";
 
@@ -92,10 +91,6 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
   const [swapState, setSwapState] = useState<AsyncState>("idle");
   const [swapMessage, setSwapMessage] = useState("");
   const [swapQuote, setSwapQuote] = useState<TreasurySwapQuote | null>(null);
-
-  const [unifiedState, setUnifiedState] = useState<AsyncState>("idle");
-  const [unifiedMessage, setUnifiedMessage] = useState("");
-  const [unifiedBalance, setUnifiedBalance] = useState<TreasuryUnifiedBalance | null>(null);
 
   const gateway = useMemo(() => new TreasuryAppKitGateway(wallet), [wallet]);
   const connectedWalletLabel = wallet.address && ARC_PUBLIC_ADDRESSES.treasury && wallet.address.toLowerCase() === ARC_PUBLIC_ADDRESSES.treasury.toLowerCase()
@@ -237,20 +232,6 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
     }
   }
 
-  async function refreshUnifiedBalance() {
-    if (!capabilityStates.unifiedBalance.enabled) return;
-    setUnifiedState("loading");
-    setUnifiedMessage("");
-    try {
-      setUnifiedBalance(await gateway.readUnifiedBalance());
-      setUnifiedState("success");
-    } catch (error) {
-      setUnifiedBalance(null);
-      setUnifiedState("error");
-      setUnifiedMessage(errorText(error).includes("Connect") ? errorText(error) : "Unified Balance unavailable.");
-    }
-  }
-
   const activeCapability = operation === "Send" ? capabilityStates.send : operation === "Bridge" ? capabilityStates.bridge : capabilityStates.swap;
   const activeRequirement = operation === "Bridge" ? bridgeWalletRequirement(wallet, bridgeDirection) : walletRequirement(wallet, true);
   const sendArcscanUrl = sendResult?.transactionHash ? `${ARC_TESTNET.explorerUrl}/tx/${sendResult.transactionHash}` : null;
@@ -359,14 +340,5 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
       </div>
     </section>
 
-    <section className="mt-20 border-t border-border pt-10" aria-labelledby="arc-liquidity-title">
-      <div className="flex items-start justify-between gap-8"><div><h2 id="arc-liquidity-title" className="text-[20px] tracking-[-0.03em]">Arc liquidity</h2><p className="mt-2 text-[10px] text-muted">Additional Circle liquidity visibility. Company Treasury remains the balance shown above.</p></div><CapabilityBadge capability={capabilityStates.unifiedBalance} /></div>
-      <div className="mt-7 divide-y divide-border border-y border-border text-[10px]">
-        <div className="grid grid-cols-[170px_1fr_140px] items-center gap-8 py-5"><p className="text-[11px]">Unified Balance</p><p className="leading-5 text-muted">View spendable USDC across supported test networks.</p><p className="text-right">{unifiedState === "loading" ? "Reading…" : unifiedBalance ? "Available" : "Not queried"}</p></div>
-        <div className="grid grid-cols-3 gap-8 py-5"><div><p className="text-muted">Confirmed</p><p className="mt-2 text-[12px]">{unifiedBalance ? `${unifiedBalance.confirmed} USDC` : "—"}</p></div><div><p className="text-muted">Pending</p><p className="mt-2 text-[12px]">{unifiedBalance ? `${unifiedBalance.pending} USDC` : "—"}</p></div><div><p className="text-muted">Available</p><p className="mt-2 text-[12px]">{unifiedBalance ? `${unifiedBalance.available} USDC` : "—"}</p></div></div>
-      </div>
-      {unifiedMessage && <p role="status" className="mt-5 text-[10px] text-muted">{unifiedMessage}</p>}
-      <div className="mt-6 flex items-center justify-between"><p className="text-[9px] text-faint">Read only. Deposit and spend are not available in this release.</p><Button onClick={() => void refreshUnifiedBalance()} disabled={!capabilityStates.unifiedBalance.enabled || Boolean(walletRequirement(wallet, false)) || unifiedState === "loading"}>Refresh Unified Balance</Button></div>
-    </section>
   </>;
 }

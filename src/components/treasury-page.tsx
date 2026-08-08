@@ -92,13 +92,5 @@ export function TreasuryPage({ state, wallet }: { state: DemoState; wallet: Trea
       onRefreshTreasury={refreshLiquidity}
     />
 
-    <section className="mt-20 border-t border-border pt-10" aria-labelledby="treasury-flow-title">
-      <p className="text-[9px] uppercase tracking-[0.14em] text-faint">How liquidity moves</p>
-      <h2 id="treasury-flow-title" className="mt-3 text-[20px] tracking-[-0.03em]">From funding to settlement</h2>
-      <div className="mt-8 grid grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] items-center gap-3 text-center text-[10px]">
-        {["Company assets", "Treasury", "Send / Bridge / Swap / Unified Balance", "Liquidity on Arc", "Rules and approvals", "Arc settlement"].map((step, index) => <div key={step} className="contents"><div className="min-h-16 border-y border-border px-3 py-4 leading-4">{step}</div>{index < 5 && <span aria-hidden="true" className="text-faint">→</span>}</div>)}
-      </div>
-      <p className="mt-5 text-[9px] leading-4 text-faint">This view explains the existing product flow. It does not change rule evaluation, approvals or settlement execution.</p>
-    </section>
   </div>;
 }
