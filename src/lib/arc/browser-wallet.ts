@@ -102,24 +102,45 @@ export function subscribeWallet(
 ): () => void {
   let address = initial.address;
   let chainId = initial.chainId;
+  let revision = 0;
+  let active = true;
   const emit = () => onChange({ address, chainId });
   const accountsChanged = (value: unknown) => {
     const accounts = Array.isArray(value) ? value as string[] : [];
     const nextAddress: `0x${string}` | null = accounts[0] && isAddress(accounts[0]) ? accounts[0] as `0x${string}` : null;
+    const currentRevision = ++revision;
     if (nextAddress?.toLowerCase() !== address?.toLowerCase()) onAccountChanged?.();
+    if (!nextAddress) {
+      address = null;
+      clearSelectedWallet();
+      emit();
+      onDisconnect?.();
+      return;
+    }
     address = nextAddress;
-    if (!address) clearSelectedWallet();
-    else if (currentWalletSession?.provider === provider) currentWalletSession = { ...currentWalletSession, address: nextAddress };
-    emit();
-    if (!address) onDisconnect?.();
+    void provider.request({ method: "eth_chainId" }).then((value) => {
+      if (!active || currentRevision !== revision) return;
+      address = nextAddress;
+      chainId = normalizeChainId(value);
+      if (currentWalletSession?.provider === provider) currentWalletSession = { ...currentWalletSession, address: nextAddress, chainId };
+      emit();
+    }).catch(() => {
+      if (!active || currentRevision !== revision) return;
+      address = nextAddress;
+      chainId = null;
+      if (currentWalletSession?.provider === provider) currentWalletSession = { ...currentWalletSession, address: nextAddress, chainId };
+      emit();
+    });
   };
   const chainChanged = (value: unknown) => {
+    revision += 1;
     chainId = typeof value === "string" || typeof value === "number" ? normalizeChainId(value) : null;
     onAccountChanged?.();
     if (currentWalletSession?.provider === provider) currentWalletSession = { ...currentWalletSession, chainId };
     emit();
   };
   const disconnected = () => {
+    revision += 1;
     address = null;
     chainId = null;
     clearSelectedWallet();
@@ -130,6 +151,8 @@ export function subscribeWallet(
   provider.on?.("chainChanged", chainChanged);
   provider.on?.("disconnect", disconnected);
   return () => {
+    active = false;
+    revision += 1;
     provider.removeListener?.("accountsChanged", accountsChanged);
     provider.removeListener?.("chainChanged", chainChanged);
     provider.removeListener?.("disconnect", disconnected);

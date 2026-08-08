@@ -145,27 +145,85 @@ test("a selected non-MetaMask EIP-6963 wallet connects through its own provider"
   assert.equal(methods.some((method) => method === "eth_sendTransaction" || method.includes("sign")), false);
 });
 
-test("account events replace the previous account, clear prepared state, and empty accounts disconnect", () => {
+test("account events replace the previous account, refresh the chain, clear prepared state, and empty accounts disconnect", async () => {
   const listeners = new Map<string, (value: unknown) => void>();
   const removed: string[] = [];
+  const methods: string[] = [];
   const provider: BrowserEthereumProvider = {
-    request: async () => null,
+    request: async ({ method }) => {
+      methods.push(method);
+      if (method === "eth_chainId") return "0x004CEF52";
+      throw new Error(`Unexpected method ${method}`);
+    },
     on: (event, listener) => { assert.equal(listeners.has(event), false); listeners.set(event, listener); },
     removeListener: (event) => { removed.push(event); },
   };
-  let latest = { address: accountOne, chainId: "0x4CEF52" } as { address: string | null; chainId: string | null };
+  let latest = { address: accountOne, chainId: "0x1" } as { address: string | null; chainId: string | null };
   let preparedClears = 0;
   let disconnects = 0;
   const unsubscribe = subscribeWallet(provider, latest, (state) => { latest = state; }, () => { disconnects += 1; }, () => { preparedClears += 1; });
   listeners.get("accountsChanged")?.([accountTwo]);
-  assert.deepEqual(latest, { address: accountTwo, chainId: "0x4CEF52" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(latest, { address: accountTwo, chainId: "0x4cef52" });
   assert.equal(preparedClears, 1);
+  assert.deepEqual(methods, ["eth_chainId"]);
+  assert.equal(methods.some((method) => method === "eth_sendTransaction" || method.includes("sign")), false);
   listeners.get("accountsChanged")?.([]);
-  assert.deepEqual(latest, { address: null, chainId: "0x4CEF52" });
+  assert.deepEqual(latest, { address: null, chainId: "0x4cef52" });
   assert.equal(preparedClears, 2);
   assert.equal(disconnects, 1);
+  assert.deepEqual(methods, ["eth_chainId"]);
   unsubscribe();
   assert.deepEqual(removed, ["accountsChanged", "chainChanged", "disconnect"]);
+});
+
+test("a stale account chain read cannot overwrite a newer account event", async () => {
+  const listeners = new Map<string, (value: unknown) => void>();
+  const chainResolvers: Array<(value: string) => void> = [];
+  const methods: string[] = [];
+  const provider: BrowserEthereumProvider = {
+    request: ({ method }) => {
+      methods.push(method);
+      if (method !== "eth_chainId") return Promise.reject(new Error(`Unexpected method ${method}`));
+      return new Promise((resolve) => chainResolvers.push(resolve as (value: string) => void));
+    },
+    on: (event, listener) => { listeners.set(event, listener); },
+    removeListener: () => undefined,
+  };
+  let latest = { address: accountOne, chainId: "0x1" } as { address: string | null; chainId: string | null };
+  const unsubscribe = subscribeWallet(provider, latest, (state) => { latest = state; });
+  listeners.get("accountsChanged")?.([accountTwo]);
+  listeners.get("accountsChanged")?.([accountOne]);
+  chainResolvers[1]?.("0x4CEF52");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(latest, { address: accountOne, chainId: "0x4cef52" });
+  chainResolvers[0]?.("0x1");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(latest, { address: accountOne, chainId: "0x4cef52" });
+  assert.deepEqual(methods, ["eth_chainId", "eth_chainId"]);
+  unsubscribe();
+});
+
+test("an empty account event prevents a pending chain read from restoring stale wallet state", async () => {
+  const listeners = new Map<string, (value: unknown) => void>();
+  let resolveChain: ((value: string) => void) | null = null;
+  const provider: BrowserEthereumProvider = {
+    request: ({ method }) => method === "eth_chainId"
+      ? new Promise((resolve) => { resolveChain = resolve as (value: string) => void; })
+      : Promise.reject(new Error(`Unexpected method ${method}`)),
+    on: (event, listener) => { listeners.set(event, listener); },
+    removeListener: () => undefined,
+  };
+  let latest = { address: accountOne, chainId: "0x1" } as { address: string | null; chainId: string | null };
+  let disconnects = 0;
+  const unsubscribe = subscribeWallet(provider, latest, (state) => { latest = state; }, () => { disconnects += 1; });
+  listeners.get("accountsChanged")?.([accountTwo]);
+  listeners.get("accountsChanged")?.([]);
+  resolveChain?.("0x4CEF52");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(latest, { address: null, chainId: "0x1" });
+  assert.equal(disconnects, 1);
+  unsubscribe();
 });
 
 test("chain events store a canonical hexadecimal chain ID", () => {
