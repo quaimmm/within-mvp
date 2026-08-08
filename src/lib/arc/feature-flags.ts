@@ -3,7 +3,13 @@ export function readArcFeatureFlags(env: Record<string, string | undefined>) {
   return { appKit, send: appKit && env.NEXT_PUBLIC_ARC_SEND_ENABLED === "true", bridge: appKit && env.NEXT_PUBLIC_ARC_BRIDGE_ENABLED === "true", unifiedBalance: appKit && env.NEXT_PUBLIC_ARC_UNIFIED_BALANCE_ENABLED === "true", swap: appKit && env.NEXT_PUBLIC_ARC_SWAP_ENABLED === "true" };
 }
 
-const flags = readArcFeatureFlags(process.env);
+const flags = readArcFeatureFlags({
+  NEXT_PUBLIC_ARC_APP_KIT_ENABLED: process.env.NEXT_PUBLIC_ARC_APP_KIT_ENABLED,
+  NEXT_PUBLIC_ARC_SEND_ENABLED: process.env.NEXT_PUBLIC_ARC_SEND_ENABLED,
+  NEXT_PUBLIC_ARC_BRIDGE_ENABLED: process.env.NEXT_PUBLIC_ARC_BRIDGE_ENABLED,
+  NEXT_PUBLIC_ARC_UNIFIED_BALANCE_ENABLED: process.env.NEXT_PUBLIC_ARC_UNIFIED_BALANCE_ENABLED,
+  NEXT_PUBLIC_ARC_SWAP_ENABLED: process.env.NEXT_PUBLIC_ARC_SWAP_ENABLED,
+});
 export const ARC_APP_KIT_ENABLED = flags.appKit;
 export const ARC_SEND_ENABLED = flags.send;
 export const ARC_BRIDGE_ENABLED = flags.bridge;

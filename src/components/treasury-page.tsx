@@ -3,44 +3,17 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SectionTitle } from "@/components/ui/section-title";
+import { TreasuryOperationsPanel } from "@/components/treasury-operations-panel";
 import type { DemoState } from "@/data/demo-state";
-import {
-  ARC_APP_KIT_ENABLED,
-  ARC_BRIDGE_ENABLED,
-  ARC_SEND_ENABLED,
-  ARC_SWAP_ENABLED,
-  ARC_UNIFIED_BALANCE_ENABLED,
-} from "@/lib/arc/feature-flags";
-import { ARC_TESTNET, isArcTestnet, shortenAddress } from "@/lib/arc/network";
+import { shortenAddress, type BrowserEthereumProvider } from "@/lib/arc/network";
 import { formatCompanyUsdc, readCompanyLiquidity, type CompanyLiquiditySnapshot } from "@/lib/treasury/company-liquidity";
 
-type TreasuryCapability = "Send" | "Bridge" | "Swap";
-type TreasuryWallet = { address: string | null; chainId: string | null };
-
-const operationFlags: Record<TreasuryCapability, boolean> = {
-  Send: ARC_SEND_ENABLED,
-  Bridge: ARC_BRIDGE_ENABLED,
-  Swap: ARC_SWAP_ENABLED,
-};
-
-const fieldClass = "mt-3 h-11 w-full border-b border-border bg-transparent text-[12px] text-ink outline-none transition-colors placeholder:text-faint focus:border-accent disabled:cursor-not-allowed disabled:text-faint";
-
-function CapabilityStatus({ enabled }: { enabled: boolean }) {
-  return <span className={`text-[9px] ${enabled ? "text-success" : "text-muted"}`}>{enabled ? "Enabled" : "Disabled"}</span>;
-}
+type TreasuryWallet = { address: string | null; chainId: string | null; provider: BrowserEthereumProvider | null; walletId?: string | null };
 
 export function TreasuryPage({ state, wallet }: { state: DemoState; wallet: TreasuryWallet }) {
-  const [operation, setOperation] = useState<TreasuryCapability>("Send");
-  const [recipient, setRecipient] = useState("");
-  const [amount, setAmount] = useState("");
-  const [reviewMessage, setReviewMessage] = useState("");
   const [liquidity, setLiquidity] = useState<CompanyLiquiditySnapshot | null>(null);
   const [liquidityStatus, setLiquidityStatus] = useState<"loading" | "success" | "error">("loading");
   const [liquidityError, setLiquidityError] = useState("");
-  const connected = Boolean(wallet.address);
-  const onArc = isArcTestnet(wallet.chainId);
-  const enabled = operationFlags[operation];
-  const canReview = enabled && connected && onArc && amount.trim().length > 0 && (operation !== "Send" || recipient.trim().length > 0);
   const totalTreasury = liquidityStatus === "success" && liquidity ? `${formatCompanyUsdc(liquidity.totalTreasury)} USDC` : liquidityStatus === "loading" ? "Reading…" : "Unavailable";
   const availableBalance = liquidityStatus === "success" && liquidity ? `${formatCompanyUsdc(liquidity.availableToSpend)} USDC` : liquidityStatus === "loading" ? "Reading…" : "Unavailable";
 
@@ -71,11 +44,6 @@ export function TreasuryPage({ state, wallet }: { state: DemoState; wallet: Trea
     });
     return () => { current = false; };
   }, []);
-
-  function prepareReview() {
-    if (!canReview) return;
-    setReviewMessage(`${operation} review prepared. No transaction has been submitted.`);
-  }
 
   return <div className="mx-auto max-w-[1120px]">
     <div className="flex items-start justify-between gap-10">
@@ -118,69 +86,7 @@ export function TreasuryPage({ state, wallet }: { state: DemoState; wallet: Trea
       {liquidity && <div className="mt-4 flex items-center justify-between gap-8 text-[9px] text-faint"><span>Only networks with verified balance data are shown.</span><span>{shortenAddress(liquidity.treasuryAddress)}</span></div>}
     </section>
 
-    <section className="mt-20" aria-labelledby="move-money-title">
-      <div className="flex items-end justify-between gap-10">
-        <div>
-          <h2 id="move-money-title" className="text-[24px] tracking-[-0.035em]">Move money</h2>
-          <p className="mt-3 text-[11px] leading-5 text-muted">Treasury liquidity operations use the existing Arc providers and current feature flags.</p>
-        </div>
-        <div className="flex border-b border-border" role="tablist" aria-label="Treasury operations">
-          {(["Send", "Bridge", "Swap"] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={operation === item} onClick={() => { setOperation(item); setReviewMessage(""); }} className={`min-w-20 px-4 pb-3 text-[11px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${operation === item ? "border-b border-ink text-ink" : "text-muted hover:text-ink"}`}>{item}</button>)}
-        </div>
-      </div>
-
-      <div className="mt-10 grid grid-cols-[1.1fr_.9fr] gap-16 border-t border-border pt-9">
-        <div>
-          <div className="flex items-center justify-between">
-            <h3 className="text-[18px] tracking-[-0.025em]">{operation}</h3>
-            <CapabilityStatus enabled={enabled} />
-          </div>
-          <p className="mt-3 max-w-xl text-[10px] leading-5 text-muted">
-            {operation === "Send" ? "Transfer USDC from the company treasury on Arc." : operation === "Bridge" ? "Bring USDC into your Within treasury from another supported network." : "Convert supported stablecoins for treasury needs on Arc."}
-          </p>
-          <div className="mt-8 grid grid-cols-2 gap-6">
-            {operation === "Send" && <label className="text-[10px] text-muted">Recipient<input aria-label="Treasury recipient" value={recipient} onChange={(event) => { setRecipient(event.target.value); setReviewMessage(""); }} placeholder={enabled ? "0x…" : "Unavailable"} disabled={!enabled} className={fieldClass} /></label>}
-            {operation === "Bridge" && <label className="text-[10px] text-muted">From<select aria-label="Treasury bridge source network" disabled={!enabled} className={fieldClass} defaultValue=""><option value="">Supported network</option></select></label>}
-            {operation === "Swap" && <label className="text-[10px] text-muted">You pay<select aria-label="Treasury swap source asset" disabled={!enabled} className={fieldClass} defaultValue="EURC"><option>EURC</option><option>USDC</option></select></label>}
-            <label className="text-[10px] text-muted">Amount<input aria-label={`Treasury ${operation.toLowerCase()} amount`} value={amount} onChange={(event) => { setAmount(event.target.value); setReviewMessage(""); }} placeholder={enabled ? "USDC amount" : "Unavailable"} disabled={!enabled} inputMode="decimal" className={fieldClass} /></label>
-          </div>
-        </div>
-        <dl className="divide-y divide-border border-y border-border text-[10px]">
-          <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Network</dt><dd>{ARC_TESTNET.chainName}</dd></div>
-          <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Asset</dt><dd>{operation === "Swap" ? "Supported stablecoins" : "USDC"}</dd></div>
-          <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Provider</dt><dd>{enabled ? "Configured Arc provider" : "Unavailable"}</dd></div>
-          <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Review</dt><dd>{reviewMessage || (enabled ? (connected ? (onArc ? "Ready for details" : "Wrong network") : "Connect wallet to continue") : "Disabled")}</dd></div>
-        </dl>
-      </div>
-      <div className="mt-7 flex justify-end"><Button variant="primary" onClick={prepareReview} disabled={!canReview}>Review {operation.toLowerCase()}</Button></div>
-    </section>
-
-    <section className="mt-20 border-t border-border pt-10" aria-labelledby="arc-liquidity-title">
-      <h2 id="arc-liquidity-title" className="text-[20px] tracking-[-0.03em]">Arc liquidity</h2>
-      <p className="mt-2 text-[10px] text-muted">Optional Arc capabilities that help Finance make company USDC available for settlement.</p>
-      <div className="mt-7 divide-y divide-border border-y border-border">
-        <div className="grid grid-cols-[170px_1fr_110px] items-center gap-8 py-5">
-          <p className="text-[11px]">Arc App Kit</p>
-          <p className="text-[10px] leading-5 text-muted">Provider access for enabled treasury operations.</p>
-          <div className="text-right"><CapabilityStatus enabled={ARC_APP_KIT_ENABLED} /></div>
-        </div>
-        <div className="grid grid-cols-[170px_1fr_110px] items-center gap-8 py-5">
-          <p className="text-[11px]">Unified Balance</p>
-          <p className="text-[10px] leading-5 text-muted">Use supported USDC balances as one spendable balance.</p>
-          <div className="text-right"><CapabilityStatus enabled={ARC_UNIFIED_BALANCE_ENABLED} /></div>
-        </div>
-        <div className="grid grid-cols-[170px_1fr_110px] items-center gap-8 py-5">
-          <p className="text-[11px]">USDC-native gas</p>
-          <p className="text-[10px] leading-5 text-muted">Arc transactions do not require a separate ETH gas balance.</p>
-          <p className="text-right text-[9px] text-success">Arc Testnet</p>
-        </div>
-        <div className="grid grid-cols-[170px_1fr_110px] items-center gap-8 py-5">
-          <p className="text-[11px]">Treasury read</p>
-          <p className="text-[10px] leading-5 text-muted">Company USDC is read directly from the configured Arc treasury address.</p>
-          <p className={`text-right text-[9px] ${liquidityStatus === "success" ? "text-success" : "text-muted"}`}>{liquidityStatus === "success" ? "Live" : liquidityStatus === "loading" ? "Reading" : "Unavailable"}</p>
-        </div>
-      </div>
-    </section>
+    <TreasuryOperationsPanel key={`${wallet.walletId ?? "no-wallet"}-${wallet.address ?? "disconnected"}-${wallet.chainId ?? "no-chain"}`} wallet={wallet} />
 
     <section className="mt-20 border-t border-border pt-10" aria-labelledby="treasury-flow-title">
       <p className="text-[9px] uppercase tracking-[0.14em] text-faint">How liquidity moves</p>

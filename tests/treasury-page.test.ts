@@ -23,21 +23,29 @@ test("Treasury is a top-level page in the required sidebar order", async () => {
 });
 
 test("Treasury presentation respects existing Arc flags and contains no execution implementation", async () => {
-  const source = await readSource("src/components/treasury-page.tsx");
+  const [source, operations] = await Promise.all([
+    readSource("src/components/treasury-page.tsx"),
+    readSource("src/components/treasury-operations-panel.tsx"),
+  ]);
+  const presentation = `${source}\n${operations}`;
 
   for (const flag of ["ARC_APP_KIT_ENABLED", "ARC_SEND_ENABLED", "ARC_BRIDGE_ENABLED", "ARC_SWAP_ENABLED", "ARC_UNIFIED_BALANCE_ENABLED"]) {
-    assert.match(source, new RegExp(flag));
+    assert.match(operations, new RegExp(flag));
   }
-  assert.match(source, /Company liquidity/);
-  assert.match(source, /Total treasury/);
-  assert.match(source, /Available to spend/);
-  assert.match(source, /Pending \/ reserved/);
-  assert.match(source, /Across networks/);
-  assert.match(source, /Move money/);
-  assert.match(source, /Arc liquidity/);
-  assert.match(source, /Company assets/);
-  assert.match(source, /Arc settlement/);
+  assert.match(presentation, /Company liquidity/);
+  assert.match(presentation, /Total treasury/);
+  assert.match(presentation, /Available to spend/);
+  assert.match(presentation, /Pending \/ reserved/);
+  assert.match(presentation, /Across networks/);
+  assert.match(presentation, /Move money/);
+  assert.match(presentation, /Arc liquidity/);
+  assert.match(presentation, /Company assets/);
+  assert.match(presentation, /Arc settlement/);
+  assert.match(source, /TreasuryOperationsPanel/);
   assert.doesNotMatch(source, /writeContract|sendTransaction|eth_sendTransaction|executePayment|bridgeToArc|spendUnifiedBalance/);
+  assert.doesNotMatch(operations, /writeContract|sendTransaction|eth_sendTransaction|bridgeToArc|spendUnifiedBalance|depositUnifiedBalance/);
+  assert.match(operations, /Confirm Send/);
+  assert.match(operations, /Execution[\s\S]*Disabled for this release/);
   assert.doesNotMatch(source, /Credit facility|Employee Credit|repay|drawCredit/);
 });
 
