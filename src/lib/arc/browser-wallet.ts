@@ -36,9 +36,13 @@ export async function discoverMetaMask(timeoutMs = 250): Promise<ArcWalletProvid
   return (await discoverBrowserWallets(timeoutMs)).find((wallet) => wallet.info.rdns === METAMASK_RDNS) ?? null;
 }
 
+export async function readWalletChainId(provider: BrowserEthereumProvider): Promise<string | null> {
+  return normalizeChainId(await provider.request({ method: "eth_chainId" }));
+}
+
 async function readProviderState(detail: ArcWalletProviderDetail): Promise<ArcWalletState> {
   const accounts = await detail.provider.request({ method: "eth_accounts" }) as string[];
-  const chainId = normalizeChainId(await detail.provider.request({ method: "eth_chainId" }));
+  const chainId = await readWalletChainId(detail.provider);
   const address = accounts[0];
   return {
     address: address && isAddress(address) ? address : null,

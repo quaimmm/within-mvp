@@ -8,6 +8,7 @@ import {
   disconnectBrowserWallet,
   discoverBrowserWallets,
   discoverMetaMask,
+  readWalletChainId,
   restoreBrowserWallet,
   subscribeWallet,
   subscribeWalletRecovery,
@@ -39,6 +40,18 @@ function installBrowser(
 }
 
 beforeEach(() => clearSelectedWallet());
+
+test("network diagnostics read and normalize only the selected provider chain", async () => {
+  const methods: string[] = [];
+  const provider: BrowserEthereumProvider = { request: async ({ method }) => {
+    methods.push(method);
+    if (method === "eth_chainId") return "0x004CEF52";
+    throw new Error(`Unexpected method ${method}`);
+  } };
+  assert.equal(await readWalletChainId(provider), "0x4cef52");
+  assert.deepEqual(methods, ["eth_chainId"]);
+  assert.equal(methods.some((method) => method === "eth_sendTransaction" || method.includes("sign") || method === "eth_requestAccounts"), false);
+});
 
 test("legacy wallet selection storage is removed without restoring an account", async () => {
   const values = new Map([["within:selected-wallet", "cached-provider"]]);

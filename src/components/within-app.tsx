@@ -112,6 +112,7 @@ function TopNavigation({
   walletBusy,
   onConnectWallet,
   onSwitchNetwork,
+  onRefreshNetwork,
   onSwitchAccount,
   onDisconnectWallet,
   onReset,
@@ -123,6 +124,7 @@ function TopNavigation({
   walletBusy: boolean;
   onConnectWallet: () => void;
   onSwitchNetwork: () => void;
+  onRefreshNetwork: () => void;
   onSwitchAccount: () => void;
   onDisconnectWallet: () => void;
   onReset: () => void;
@@ -186,6 +188,17 @@ function TopNavigation({
           {connected && walletOpen && <div role="menu" aria-label="Connected wallet" className="absolute right-0 top-11 w-72 rounded-xl border border-border bg-white p-4 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">
             <p className="text-[10px] font-medium text-ink">Connected wallet</p>
             <p className="mt-2 break-all text-[9px] leading-4 text-muted">{wallet.address}</p>
+            <div className="mt-4 border-y border-border py-3 text-[9px] leading-4 text-muted">
+              <p className="font-medium text-ink">Temporary wallet diagnostics</p>
+              <dl className="mt-2 space-y-1">
+                <div className="flex justify-between gap-4"><dt>Address</dt><dd className="max-w-[160px] break-all text-right">{wallet.address ?? "null"}</dd></div>
+                <div className="flex justify-between gap-4"><dt>Chain ID</dt><dd>{wallet.chainId ?? "null"}</dd></div>
+                <div className="flex justify-between gap-4"><dt>Arc match</dt><dd>{String(isArcTestnet(wallet.chainId))}</dd></div>
+                <div className="flex justify-between gap-4"><dt>Expected decimal</dt><dd>{ARC_TESTNET.chainId}</dd></div>
+                <div className="flex justify-between gap-4"><dt>Expected hex</dt><dd>{ARC_TESTNET.chainIdHex}</dd></div>
+              </dl>
+              <button type="button" onClick={onRefreshNetwork} disabled={walletBusy} className="mt-3 text-accent transition-opacity hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40">Refresh network state</button>
+            </div>
             <div className="mt-4 border-t border-border pt-3 text-[10px]">
               <button type="button" role="menuitem" onClick={() => void copyWalletAddress()} className="block w-full rounded-md px-2 py-2 text-left text-muted hover:bg-canvas hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{addressCopied ? "Copied" : "Copy address"}</button>
               <a href={`${ARC_TESTNET.explorerUrl}/address/${wallet.address}`} target="_blank" rel="noopener noreferrer" aria-label="View connected wallet on ArcScan (opens in a new tab)" className="flex items-center justify-between rounded-md px-2 py-2 text-muted hover:bg-canvas hover:text-ink">View on ArcScan<ExternalLinkIcon/></a>
@@ -638,6 +651,14 @@ export default function WithinApp() {
     await walletSession.switchNetwork();
   }
 
+  async function refreshAppNetwork() {
+    try {
+      await walletSession.refreshNetwork();
+    } catch {
+      // The diagnostic values remain unchanged when the provider read fails.
+    }
+  }
+
   async function switchAppAccount() {
     await walletSession.switchAccount();
   }
@@ -710,7 +731,7 @@ export default function WithinApp() {
     <div className={`min-h-screen min-w-[1024px] bg-canvas text-ink ${introMode !== "ready" ? `app-entry app-entry-${introMode}` : ""}`}>
       <Sidebar page={page} onNavigate={setPage} />
       {page !== "Credit" && <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>}
-      <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
+      <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onRefreshNetwork={() => void refreshAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
       <main className="ml-[224px] flex min-h-screen flex-col pt-[72px]">
         <div className="flex-1 px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} wallet={appWallet} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={`${demoState.idempotency.publish}-${walletSessionVersion}`} demoState={demoState} setDemoState={setDemoState} /> : page === "Treasury" ? <TreasuryPage state={demoState} wallet={appWallet} /> : page === "Credit" ? <EmployeeCreditPage key={walletSessionVersion} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />}</div>
         <AuthenticatedFooter wallet={appWallet}/>

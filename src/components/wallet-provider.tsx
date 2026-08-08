@@ -5,6 +5,7 @@ import {
   connectBrowserWallet,
   discardLegacyWalletPersistence,
   disconnectBrowserWallet,
+  readWalletChainId,
   refreshBrowserWallet,
   subscribeWallet,
   subscribeWalletRecovery,
@@ -32,6 +33,7 @@ type WalletContextValue = {
   connect: (detail?: ArcWalletProviderDetail) => Promise<SharedWallet>;
   switchAccount: () => Promise<SharedWallet>;
   switchNetwork: () => Promise<string>;
+  refreshNetwork: () => Promise<string | null>;
   disconnect: () => Promise<void>;
 };
 
@@ -186,6 +188,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshNetwork = useCallback(async () => {
+    const provider = walletRef.current.provider;
+    if (!provider) return null;
+    setBusy(true);
+    try {
+      const chainId = await readWalletChainId(provider);
+      if (walletRef.current.provider !== provider) return null;
+      setWallet((current) => current.provider === provider ? { ...current, chainId } : current);
+      return chainId;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const disconnect = useCallback(async () => {
     setBusy(true);
     try {
@@ -208,8 +224,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     connect,
     switchAccount,
     switchNetwork,
+    refreshNetwork,
     disconnect,
-  }), [busy, connect, connectedThisSession, disconnect, ready, sessionVersion, switchAccount, switchNetwork, wallet]);
+  }), [busy, connect, connectedThisSession, disconnect, ready, refreshNetwork, sessionVersion, switchAccount, switchNetwork, wallet]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }
