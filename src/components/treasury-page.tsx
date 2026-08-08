@@ -86,7 +86,11 @@ export function TreasuryPage({ state, wallet }: { state: DemoState; wallet: Trea
       {liquidity && <div className="mt-4 flex items-center justify-between gap-8 text-[9px] text-faint"><span>Only networks with verified balance data are shown.</span><span>{shortenAddress(liquidity.treasuryAddress)}</span></div>}
     </section>
 
-    <TreasuryOperationsPanel key={`${wallet.walletId ?? "no-wallet"}-${wallet.address ?? "disconnected"}-${wallet.chainId ?? "no-chain"}`} wallet={wallet} />
+    <TreasuryOperationsPanel
+      key={`${wallet.walletId ?? "no-wallet"}-${wallet.address ?? "disconnected"}-${wallet.chainId ?? "no-chain"}`}
+      wallet={wallet}
+      onRefreshTreasury={refreshLiquidity}
+    />
 
     <section className="mt-20 border-t border-border pt-10" aria-labelledby="treasury-flow-title">
       <p className="text-[9px] uppercase tracking-[0.14em] text-faint">How liquidity moves</p>

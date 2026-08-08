@@ -22,7 +22,7 @@ test("Treasury is a top-level page in the required sidebar order", async () => {
   assert.match(shell, /page === "Treasury" \? <TreasuryPage/);
 });
 
-test("Treasury presentation respects existing Arc flags and contains no execution implementation", async () => {
+test("Treasury presentation respects existing Arc flags and isolates execution behind the gateway", async () => {
   const [source, operations] = await Promise.all([
     readSource("src/components/treasury-page.tsx"),
     readSource("src/components/treasury-operations-panel.tsx"),
@@ -45,6 +45,7 @@ test("Treasury presentation respects existing Arc flags and contains no executio
   assert.doesNotMatch(source, /writeContract|sendTransaction|eth_sendTransaction|executePayment|bridgeToArc|spendUnifiedBalance/);
   assert.doesNotMatch(operations, /writeContract|sendTransaction|eth_sendTransaction|bridgeToArc|spendUnifiedBalance|depositUnifiedBalance/);
   assert.match(operations, /Confirm Send/);
+  assert.match(operations, /Confirm bridge/);
   assert.match(operations, /Execution[\s\S]*Disabled for this release/);
   assert.doesNotMatch(source, /Credit facility|Employee Credit|repay|drawCredit/);
 });

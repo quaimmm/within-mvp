@@ -13,10 +13,14 @@ import {
 } from "@/lib/arc/feature-flags";
 import { ARC_TESTNET, isArcTestnet, shortenAddress } from "@/lib/arc/network";
 import type { AppKitPaymentResult, PaymentEstimate } from "@/lib/arc/types";
+import { TREASURY_BRIDGE_ROUTES, type TreasuryBridgeDirection } from "@/lib/arc/treasury-operations";
 import type { TreasuryAsset, TreasurySwapQuote } from "@/lib/arc/treasury-swap";
 import {
+  defaultTreasuryBridgeDestination,
   getTreasuryCapabilityStates,
+  treasuryBridgeErrorMessage,
   TreasuryAppKitGateway,
+  type TreasuryBridgeExecutionResult,
   type TreasuryBridgeReview,
   type TreasuryCapabilityState,
   type TreasuryUnifiedBalance,
@@ -51,11 +55,18 @@ function walletRequirement(wallet: TreasuryWalletContext, requireArc = true) {
   return null;
 }
 
+function bridgeWalletRequirement(wallet: TreasuryWalletContext, direction: TreasuryBridgeDirection) {
+  if (!wallet.address || !wallet.provider) return "Connect wallet in the header to continue.";
+  const route = TREASURY_BRIDGE_ROUTES[direction];
+  if (wallet.chainId?.toLowerCase() !== route.sourceChainIdHex.toLowerCase()) return `Switch your wallet to ${route.sourceName} to continue.`;
+  return null;
+}
+
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : "The Arc request could not be completed.";
 }
 
-export function TreasuryOperationsPanel({ wallet }: { wallet: TreasuryWalletContext }) {
+export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet: TreasuryWalletContext; onRefreshTreasury?: () => Promise<void> }) {
   const [operation, setOperation] = useState<Operation>("Send");
   const [recipient, setRecipient] = useState(ARC_PUBLIC_ADDRESSES.merchant);
   const [sendAmount, setSendAmount] = useState("0.01");
@@ -65,11 +76,15 @@ export function TreasuryOperationsPanel({ wallet }: { wallet: TreasuryWalletCont
   const [sendResult, setSendResult] = useState<AppKitPaymentResult | null>(null);
   const sendLock = useRef(false);
 
+  const [bridgeDirection, setBridgeDirection] = useState<TreasuryBridgeDirection>("ethereum-to-arc");
   const [bridgeAmount, setBridgeAmount] = useState("0.01");
-  const [bridgeDestination, setBridgeDestination] = useState(ARC_PUBLIC_ADDRESSES.treasury || wallet.address || "");
-  const [bridgeState, setBridgeState] = useState<AsyncState>("idle");
+  const [bridgeDestination, setBridgeDestination] = useState(ARC_PUBLIC_ADDRESSES.treasury);
+  const [bridgeState, setBridgeState] = useState<"idle" | "reviewing" | "reviewed" | "walletPending" | "processing" | "success" | "error">("idle");
   const [bridgeMessage, setBridgeMessage] = useState("");
   const [bridgeReview, setBridgeReview] = useState<TreasuryBridgeReview | null>(null);
+  const [bridgeExecution, setBridgeExecution] = useState<TreasuryBridgeExecutionResult | null>(null);
+  const [treasuryAddressCopied, setTreasuryAddressCopied] = useState(false);
+  const bridgeLock = useRef(false);
 
   const [swapFrom, setSwapFrom] = useState<TreasuryAsset>("EURC");
   const [swapTo, setSwapTo] = useState<TreasuryAsset>("USDC");
@@ -86,6 +101,24 @@ export function TreasuryOperationsPanel({ wallet }: { wallet: TreasuryWalletCont
   const connectedWalletLabel = wallet.address && ARC_PUBLIC_ADDRESSES.treasury && wallet.address.toLowerCase() === ARC_PUBLIC_ADDRESSES.treasury.toLowerCase()
     ? "Company treasury wallet"
     : "Connected finance wallet";
+
+  function resetBridgeReview() {
+    setBridgeReview(null);
+    setBridgeExecution(null);
+    setBridgeState("idle");
+    setBridgeMessage("");
+  }
+
+  function selectBridgeDirection(direction: TreasuryBridgeDirection) {
+    setBridgeDirection(direction);
+    setBridgeDestination(defaultTreasuryBridgeDestination(direction, ARC_PUBLIC_ADDRESSES.treasury, wallet.address));
+    resetBridgeReview();
+  }
+
+  function openInboundBridge() {
+    setOperation("Bridge");
+    selectBridgeDirection("ethereum-to-arc");
+  }
 
   function updateSendRecipient(value: string) {
     setRecipient(value);
@@ -144,15 +177,49 @@ export function TreasuryOperationsPanel({ wallet }: { wallet: TreasuryWalletCont
 
   async function reviewBridgeEstimate() {
     if (!capabilityStates.bridge.enabled) return;
-    setBridgeState("loading");
+    setBridgeState("reviewing");
     setBridgeMessage("");
     setBridgeReview(null);
+    setBridgeExecution(null);
     try {
-      setBridgeReview(await gateway.reviewBridge(bridgeDestination, bridgeAmount));
-      setBridgeState("success");
-    } catch {
+      setBridgeReview(await gateway.reviewBridge(bridgeDirection, bridgeDestination, bridgeAmount));
+      setBridgeState("reviewed");
+    } catch (error) {
       setBridgeState("error");
-      setBridgeMessage("Live estimate unavailable.");
+      setBridgeMessage(errorText(error).includes("Switch your wallet") ? errorText(error) : `Estimate unavailable. ${errorText(error)}`);
+    }
+  }
+
+  async function confirmBridge() {
+    if (!bridgeReview || bridgeLock.current || bridgeExecution) return;
+    bridgeLock.current = true;
+    setBridgeState("walletPending");
+    setBridgeMessage("Waiting for wallet confirmation…");
+    try {
+      const result = await gateway.confirmBridge(bridgeReview, `TREASURY-BRIDGE-${Date.now()}`);
+      setBridgeExecution(result);
+      if (result.state === "success") {
+        setBridgeState("success");
+        setBridgeMessage("Bridge completed through Circle App Kit.");
+        if (bridgeReview.direction === "ethereum-to-arc") await onRefreshTreasury?.();
+      } else if (result.state === "pending") {
+        setBridgeState("processing");
+        setBridgeMessage("Bridge submitted. Processing cross-chain transfer.");
+      } else {
+        const failedStep = result.steps.find((step) => step.state === "error");
+        setBridgeState("error");
+        setBridgeMessage(treasuryBridgeErrorMessage(failedStep ?? new Error("Cross-chain processing failed.")));
+      }
+    } catch (error) {
+      const message = treasuryBridgeErrorMessage(error);
+      if (message.startsWith("Wallet confirmation was cancelled") || message.startsWith("Switch your wallet") || message.startsWith("Wallet account")) {
+        setBridgeState("reviewed");
+      } else {
+        setBridgeState("error");
+      }
+      setBridgeMessage(message);
+    } finally {
+      bridgeLock.current = false;
     }
   }
 
@@ -185,10 +252,35 @@ export function TreasuryOperationsPanel({ wallet }: { wallet: TreasuryWalletCont
   }
 
   const activeCapability = operation === "Send" ? capabilityStates.send : operation === "Bridge" ? capabilityStates.bridge : capabilityStates.swap;
-  const activeRequirement = walletRequirement(wallet, operation !== "Bridge");
+  const activeRequirement = operation === "Bridge" ? bridgeWalletRequirement(wallet, bridgeDirection) : walletRequirement(wallet, true);
   const sendArcscanUrl = sendResult?.transactionHash ? `${ARC_TESTNET.explorerUrl}/tx/${sendResult.transactionHash}` : null;
 
   return <>
+    <section className="mt-20 border-t border-border pt-10" aria-labelledby="fund-treasury-title">
+      <div className="flex items-start justify-between gap-10">
+        <div>
+          <h2 id="fund-treasury-title" className="text-[20px] tracking-[-0.03em]">Fund treasury</h2>
+          <p className="mt-3 text-[10px] leading-5 text-muted">Receive USDC directly on Arc or bridge it from Ethereum Sepolia.</p>
+        </div>
+        <div className="flex gap-3">
+          <Button
+            onClick={() => {
+              if (!ARC_PUBLIC_ADDRESSES.treasury) return;
+              void navigator.clipboard.writeText(ARC_PUBLIC_ADDRESSES.treasury).then(() => setTreasuryAddressCopied(true));
+            }}
+            disabled={!ARC_PUBLIC_ADDRESSES.treasury}
+          >
+            {treasuryAddressCopied ? "Copied" : "Copy address"}
+          </Button>
+          <Button variant="primary" onClick={openInboundBridge} disabled={!capabilityStates.bridge.enabled}>Bridge from Ethereum Sepolia</Button>
+        </div>
+      </div>
+      <div className="mt-7 flex items-center justify-between border-y border-border py-5 text-[10px]">
+        <div><p className="text-[11px]">Receive USDC on Arc</p><p className="mt-1 text-muted">Company Treasury</p></div>
+        <p className="font-mono text-[10px]">{ARC_PUBLIC_ADDRESSES.treasury || "Not configured"}</p>
+      </div>
+    </section>
+
     <section className="mt-20" aria-labelledby="move-money-title">
       <div className="flex items-end justify-between gap-10">
         <div><h2 id="move-money-title" className="text-[24px] tracking-[-0.035em]">Move money</h2><p className="mt-3 text-[11px] leading-5 text-muted">Review live Arc treasury operations before any wallet request.</p></div>
@@ -199,7 +291,7 @@ export function TreasuryOperationsPanel({ wallet }: { wallet: TreasuryWalletCont
 
       <div className="mt-10 border-t border-border pt-9">
         <div className="flex items-start justify-between gap-8">
-          <div><h3 className="text-[18px] tracking-[-0.025em]">{operation}</h3><p className="mt-3 text-[10px] leading-5 text-muted">{operation === "Send" ? "Transfer USDC on Arc." : operation === "Bridge" ? "Preview moving USDC from Ethereum Sepolia into Arc." : "Preview a supported stablecoin exchange on Arc."}</p></div>
+          <div><h3 className="text-[18px] tracking-[-0.025em]">{operation}</h3><p className="mt-3 text-[10px] leading-5 text-muted">{operation === "Send" ? "Transfer USDC on Arc." : operation === "Bridge" ? "Move USDC between Ethereum Sepolia and Arc Testnet." : "Preview a supported stablecoin exchange on Arc."}</p></div>
           <CapabilityBadge capability={activeCapability} />
         </div>
         {!activeCapability.enabled && <p className="mt-5 text-[10px] text-muted">This capability is not configured in the current environment.</p>}
@@ -227,19 +319,25 @@ export function TreasuryOperationsPanel({ wallet }: { wallet: TreasuryWalletCont
 
         {operation === "Bridge" && <div className="mt-8">
           <div className="grid grid-cols-2 gap-7">
-            <label className="text-[10px] text-muted">Source network<select aria-label="Treasury bridge source" value="Ethereum Sepolia" disabled className={fieldClass}><option>Ethereum Sepolia</option></select></label>
-            <label className="text-[10px] text-muted">Destination network<select aria-label="Treasury bridge destination network" value="Arc Testnet" disabled className={fieldClass}><option>Arc Testnet</option></select></label>
-            <label className="text-[10px] text-muted">Destination<input aria-label="Treasury bridge destination" value={bridgeDestination} onChange={(event) => { setBridgeDestination(event.target.value); setBridgeReview(null); setBridgeState("idle"); }} placeholder="0x…" disabled={!capabilityStates.bridge.enabled} className={fieldClass} /></label>
-            <label className="text-[10px] text-muted">USDC amount<input aria-label="Treasury bridge amount" value={bridgeAmount} onChange={(event) => { setBridgeAmount(event.target.value); setBridgeReview(null); setBridgeState("idle"); }} inputMode="decimal" disabled={!capabilityStates.bridge.enabled} className={fieldClass} /></label>
+            <label className="text-[10px] text-muted">Source network<select aria-label="Treasury bridge source" value={bridgeDirection} onChange={(event) => selectBridgeDirection(event.target.value as TreasuryBridgeDirection)} disabled={!capabilityStates.bridge.enabled || bridgeState === "walletPending" || bridgeState === "processing"} className={fieldClass}><option value="ethereum-to-arc">Ethereum Sepolia</option><option value="arc-to-ethereum">Arc Testnet</option></select></label>
+            <label className="text-[10px] text-muted">Destination network<select aria-label="Treasury bridge destination network" value={bridgeDirection === "ethereum-to-arc" ? "Arc Testnet" : "Ethereum Sepolia"} disabled className={fieldClass}><option>{bridgeDirection === "ethereum-to-arc" ? "Arc Testnet" : "Ethereum Sepolia"}</option></select></label>
+            <label className="text-[10px] text-muted">Destination<input aria-label="Treasury bridge destination" value={bridgeDestination} onChange={(event) => { setBridgeDestination(event.target.value); resetBridgeReview(); }} placeholder="0x…" disabled={!capabilityStates.bridge.enabled || bridgeState === "walletPending" || bridgeState === "processing"} className={fieldClass} /><span className="mt-2 block text-[9px] text-faint">{bridgeDirection === "ethereum-to-arc" && Boolean(ARC_PUBLIC_ADDRESSES.treasury) && bridgeDestination.toLowerCase() === ARC_PUBLIC_ADDRESSES.treasury.toLowerCase() ? `Company Treasury · ${shortenAddress(bridgeDestination)}` : bridgeDirection === "arc-to-ethereum" && Boolean(wallet.address) && bridgeDestination.toLowerCase() === wallet.address!.toLowerCase() ? `Connected finance wallet · ${shortenAddress(bridgeDestination)}` : "Review destination before confirming."}</span></label>
+            <label className="text-[10px] text-muted">USDC amount<input aria-label="Treasury bridge amount" value={bridgeAmount} onChange={(event) => { setBridgeAmount(event.target.value); resetBridgeReview(); }} inputMode="decimal" disabled={!capabilityStates.bridge.enabled || bridgeState === "walletPending" || bridgeState === "processing"} className={fieldClass} /></label>
           </div>
           <dl className="mt-8 divide-y divide-border border-y border-border text-[10px]">
-            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Route</dt><dd>Ethereum Sepolia → Arc Testnet</dd></div>
-            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Estimate</dt><dd>{bridgeState === "loading" ? "Requesting…" : bridgeReview ? (bridgeReview.fees.join(" · ") || "No fee returned") : "Review required"}</dd></div>
-            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Execution</dt><dd>Disabled for this release</dd></div>
+            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Route</dt><dd>{TREASURY_BRIDGE_ROUTES[bridgeDirection].sourceName} → {TREASURY_BRIDGE_ROUTES[bridgeDirection].destinationName}</dd></div>
+            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Asset</dt><dd>USDC</dd></div>
+            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Estimate</dt><dd>{bridgeState === "reviewing" ? "Requesting…" : bridgeReview ? (bridgeReview.fees.join(" · ") || "No fee returned by App Kit") : "Review required"}</dd></div>
+            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Status</dt><dd>{bridgeState === "reviewing" ? "Preparing" : bridgeState === "reviewed" ? "Reviewed · not submitted" : bridgeState === "walletPending" ? "Waiting for wallet" : bridgeState === "processing" ? "Submitted · processing cross-chain transfer" : bridgeState === "success" ? "Completed" : bridgeState === "error" ? "Failed" : "Not submitted"}</dd></div>
           </dl>
           {bridgeMessage && <p role="status" className="mt-5 text-[10px] text-muted">{bridgeMessage}</p>}
-          {bridgeReview && <p role="status" className="mt-5 text-[10px] text-success">Estimate ready. No wallet request was made.</p>}
-          <div className="mt-7 flex justify-end"><Button variant="primary" onClick={() => void reviewBridgeEstimate()} disabled={!capabilityStates.bridge.enabled || Boolean(activeRequirement) || bridgeState === "loading"}>{bridgeReview ? "Refresh estimate" : "Review bridge"}</Button></div>
+          {bridgeReview && bridgeState === "reviewed" && !bridgeMessage && <p role="status" className="mt-5 text-[10px] text-success">Review ready. No wallet request was made.</p>}
+          {bridgeExecution && <div className="mt-7 divide-y divide-border border-y border-border">{bridgeExecution.steps.map((step, index) => <div key={`${step.name}-${index}`} className="flex items-start justify-between gap-6 py-4 text-[10px]"><div><p>{step.name}</p>{step.errorMessage && <p className="mt-1 text-muted">{step.errorMessage}</p>}</div><div className="text-right"><p className={step.state === "success" ? "text-success" : step.state === "error" ? "text-[#9a4d45]" : "text-muted"}>{step.state === "noop" ? "Not required" : step.state}</p>{step.explorerUrl && <a href={step.explorerUrl} target="_blank" rel="noopener noreferrer" className="mt-1 block text-accent hover:underline">View transaction</a>}</div></div>)}</div>}
+          <div className="mt-7 flex justify-end gap-3">
+            {!bridgeReview && <Button variant="primary" onClick={() => void reviewBridgeEstimate()} disabled={!capabilityStates.bridge.enabled || Boolean(activeRequirement) || bridgeState === "reviewing"}>Review bridge</Button>}
+            {bridgeReview && !bridgeExecution && <><Button onClick={resetBridgeReview} disabled={bridgeState === "walletPending"}>Edit</Button><Button variant="primary" onClick={() => void confirmBridge()} disabled={bridgeState === "walletPending" || bridgeState === "processing" || bridgeState === "error"}>Confirm bridge</Button></>}
+            {bridgeExecution?.state === "success" && bridgeReview?.direction === "ethereum-to-arc" && <Button onClick={() => void onRefreshTreasury?.()}>Refresh treasury</Button>}
+          </div>
         </div>}
 
         {operation === "Swap" && <div className="mt-8">
