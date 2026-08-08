@@ -7,7 +7,7 @@ import type { CreditState } from "../lib/credit/types.ts";
 export const DEMO_STATE_VERSION = 6;
 export const DEMO_STORAGE_KEY = "within:demo-state";
 
-export type DemoPage = "Dashboard" | "Cards" | "Approvals" | "Rules" | "Credit" | "Team" | "Analytics" | "Settings";
+export type DemoPage = "Dashboard" | "Cards" | "Approvals" | "Rules" | "Treasury" | "Credit" | "Team" | "Analytics" | "Settings";
 export type TransactionStatus = "Approved" | "Pending" | "Declined" | "Flagged";
 export type DashboardTransaction = { id: string; eventId?: string; initials: string; employee: string; role: string; merchant: string; category: string; amount: string; status: TransactionStatus };
 export type SeededRule = { policyId: string; name: string; description: string; active: boolean };

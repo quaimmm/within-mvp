@@ -14,6 +14,7 @@ import {
   RuleIcon,
   SettingsIcon,
   TeamIcon,
+  WalletIcon,
 } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { paymentStages, usePaymentExecution } from "@/hooks/use-payment-execution";
@@ -30,6 +31,7 @@ import { AnalyticsPage, ApprovalsPage, CardsPage, TeamPage } from "@/components/
 import { SettingsPage } from "@/components/settings-page";
 import { AppEntryReveal, WITHIN_APP_INTRO_SEEN_KEY, WITHIN_ENTRY_SOURCE_KEY } from "@/components/app-entry-reveal";
 import { EmployeeCreditPage } from "@/components/employee-credit-page";
+import { TreasuryPage } from "@/components/treasury-page";
 import { RulesArcPolicyStatus } from "@/components/rules-arc-policy-status";
 import { AskWithinPanel } from "@/components/ask-within-panel";
 import { useWallet } from "@/components/wallet-provider";
@@ -43,6 +45,7 @@ const navigation = [
   { label: "Cards", icon: CardIcon },
   { label: "Approvals", icon: ApprovalIcon },
   { label: "Rules", icon: RuleIcon },
+  { label: "Treasury", icon: WalletIcon },
   { label: "Credit", icon: CardIcon },
   { label: "Team", icon: TeamIcon },
   { label: "Analytics", icon: AnalyticsIcon },
@@ -709,7 +712,7 @@ export default function WithinApp() {
       {page !== "Credit" && <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>}
       <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
       <main className="ml-[224px] flex min-h-screen flex-col pt-[72px]">
-        <div className="flex-1 px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} wallet={appWallet} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={`${demoState.idempotency.publish}-${walletSessionVersion}`} demoState={demoState} setDemoState={setDemoState} /> : page === "Credit" ? <EmployeeCreditPage key={walletSessionVersion} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />}</div>
+        <div className="flex-1 px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} wallet={appWallet} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={`${demoState.idempotency.publish}-${walletSessionVersion}`} demoState={demoState} setDemoState={setDemoState} /> : page === "Treasury" ? <TreasuryPage state={demoState} wallet={appWallet} /> : page === "Credit" ? <EmployeeCreditPage key={walletSessionVersion} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />}</div>
         <AuthenticatedFooter wallet={appWallet}/>
       </main>
       {selectedApproval && demoState.dashboard.drawerOpen && (selectedApproval.approvalType === "Treasury multisig" ? <MultisigApprovalDrawer approval={selectedApproval} state={demoState} setState={setDemoState} onClose={closeApproval}/> : <ApprovalDrawer approval={selectedApproval} decision={decision} completedPayment={demoState.dashboard.paymentResult} paymentIdempotencyKey={`${selectedApproval.id}-${demoState.idempotency.payment}`} onPaymentComplete={completePayment} onDecline={declineApproval} onClose={() => { if (decision === "idle") closeApproval(); }} />)}
