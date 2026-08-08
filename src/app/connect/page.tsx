@@ -18,7 +18,7 @@ import {
 } from "@/lib/arc/network";
 import { DEMO_STORAGE_KEY, restoreDemoState } from "@/data/demo-state";
 
-type WalletOperation = "connecting" | "switching" | null;
+type WalletOperation = "connecting" | null;
 
 export default function ConnectPage() {
   const router = useRouter();
@@ -74,38 +74,9 @@ export default function ConnectPage() {
     } finally { setOperation(null); setBusyWalletId(null); }
   }
 
-  async function switchAccount() {
-    setOperation("connecting"); setWalletMessage(""); setWalletDetails("");
-    try {
-      await walletSession.switchAccount();
-      setWalletMessage(`${wallet.walletName || "Wallet"} account updated.`);
-    } catch (switchError) {
-      setWalletMessage((switchError as { code?: number })?.code === 4001 ? "Wallet connection was cancelled." : walletErrorMessage(switchError, "connect"));
-      setWalletDetails(providerErrorDetails(switchError));
-    } finally { setOperation(null); }
-  }
-
-  async function switchNetwork() {
-    if (!wallet.provider) { setWalletMessage("Reconnect the selected wallet before switching networks."); return; }
-    setOperation("switching"); setWalletMessage(""); setWalletDetails("");
-    try {
-      await walletSession.switchNetwork();
-      setWalletMessage("Arc Testnet connected.");
-    } catch (switchError) {
-      setWalletMessage(walletErrorMessage(switchError, "switch"));
-      setWalletDetails(providerErrorDetails(switchError));
-    } finally { setOperation(null); }
-  }
-
   async function disconnect() {
     await walletSession.disconnect();
     setWalletMessage("Wallet disconnected from Within for this browser session.");
-  }
-
-  async function copyAddress() {
-    if (!wallet.address) return;
-    await navigator.clipboard.writeText(wallet.address);
-    setWalletMessage("Wallet address copied.");
   }
 
   const walletDecision = walletConnectionDecision(wallet.address, wallet.chainId);
@@ -138,19 +109,17 @@ export default function ConnectPage() {
               <div className="flex justify-between gap-8 py-4"><dt className="text-muted">Network</dt><dd>{wallet.address ? isArcTestnet(wallet.chainId) ? "Arc Testnet" : "Wrong network" : "Not connected"}</dd></div>
             </dl>
             <WalletSelector wallets={walletOptions} connectedWalletId={wallet.walletId} busyWalletId={busyWalletId} scanning={scanningWallets} onSelect={(detail) => void connect(detail)} onRescan={() => void scanWallets()}/>
-            <div className="mt-6 flex flex-wrap gap-3">
-              {!walletDecision.connected && walletOptions.length === 0 && !scanningWallets && <Button variant="primary" onClick={() => void scanWallets()} disabled={operation!==null}>Rescan wallets</Button>}
-              {walletDecision.connected && <>
-                <Button onClick={switchAccount} disabled={operation!==null}>Switch {wallet.walletName || "wallet"} account</Button>
-                {walletDecision.onArcTestnet ? <Button variant="primary" onClick={continueToWorkspace}>Continue to workspace</Button> : <>
-                  <Button variant="primary" onClick={switchNetwork} disabled={operation!==null}>{operation==="switching"?"Switching network…":"Switch to Arc Testnet"}</Button>
-                  <Button onClick={continueToWorkspace}>Continue to workspace</Button>
-                </>}
-                <Button onClick={()=>void disconnect()} disabled={operation!==null}>Disconnect from Within</Button>
-                <Button onClick={copyAddress}>Copy address</Button>
-              </>}
-              {walletDecision.showContinueWithoutWallet && <Button onClick={continueToWorkspace}>Continue without wallet</Button>}
-            </div>
+            {walletDecision.connected ? (
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <Button variant="primary" onClick={continueToWorkspace} className="h-11 w-full">Continue to workspace</Button>
+                <Button onClick={()=>void disconnect()} disabled={operation!==null} className="h-11 w-full">Disconnect from Within</Button>
+              </div>
+            ) : (
+              <div className="mt-6 flex flex-wrap gap-3">
+                {walletOptions.length === 0 && !scanningWallets && <Button variant="primary" onClick={() => void scanWallets()} disabled={operation!==null}>Rescan wallets</Button>}
+                {walletDecision.showContinueWithoutWallet && <Button onClick={continueToWorkspace}>Continue without wallet</Button>}
+              </div>
+            )}
             <p className="mt-4 text-[9px] text-faint">Arc RPC: {rpcReady===null?"Checking…":rpcReady?"Available":"Temporarily unavailable"}</p>
             {walletMessage&&<p role="status" className="mt-3 text-[10px] leading-5 text-muted">{walletMessage}</p>}
             {walletDetails&&process.env.NODE_ENV==="development"&&<details className="mt-3 text-[9px] text-faint"><summary>Developer details</summary><p className="mt-2 break-words">{walletDetails}</p></details>}
