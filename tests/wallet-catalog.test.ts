@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { BrowserEthereumProvider } from "../src/lib/arc/network.ts";
 import { buildWalletCatalog } from "../src/lib/arc/wallet-catalog.ts";
@@ -32,4 +33,16 @@ test("unknown EIP-6963 wallets remain connectable and WalletConnect fails closed
   assert.equal(unconfigured.find((wallet) => wallet.id === "new-wallet")?.detail?.provider, provider);
   assert.equal(unconfigured.find((wallet) => wallet.brand === "walletconnect")?.status, "configuration-required");
   assert.equal(buildWalletCatalog([], "configured-id").find((wallet) => wallet.brand === "walletconnect")?.status, "provider-unavailable");
+});
+
+test("wallet selector provides crisp branded fallbacks without replacing discovered icons", async () => {
+  const source = await readFile(new URL("../src/components/wallet-selector.tsx", import.meta.url), "utf8");
+  assert.match(source, /brand === "coinbase"/);
+  assert.match(source, /#0052FF/);
+  assert.match(source, /brand === "phantom"/);
+  assert.match(source, /#AB9FF2/);
+  assert.match(source, /brand === "walletconnect"/);
+  assert.match(source, /#3396FF/);
+  assert.match(source, /backgroundSize: "24px 24px"/);
+  assert.match(source, /detail\?\.info\.icon/);
 });
