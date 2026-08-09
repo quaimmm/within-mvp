@@ -342,7 +342,8 @@ test("workspace navigation preserves the shared in-memory wallet without disconn
   assert.doesNotMatch(connectPage, /window\.location|location\.href|document\.location|router\.refresh|<a[^>]+href="\/app"/);
   assert.equal((connectPage.match(/onClick=\{continueToWorkspace\}/g) ?? []).length, 1);
   assert.doesNotMatch(connectPage, /Work email|Continue as administrator|Continue without wallet|useState\("amanda@northstar\.io"\)/);
-  assert.match(connectPage, />Connect your wallet<\/h2>/);
+  assert.match(connectPage, /Connect your wallet to enter the workspace\./);
+  assert.match(connectPage, />Choose your wallet<\/h2>/);
   assert.doesNotMatch(connectPage, />Copy address<|>Switch \{wallet\.walletName/);
   assert.match(connectPage, /variant="primary" onClick=\{continueToWorkspace\} className="h-11 w-full">Continue to workspace/);
   assert.match(connectPage, /onClick=\{\(\)=>void disconnect\(\)\}[^>]*className="h-11 w-full">Disconnect from Within/);

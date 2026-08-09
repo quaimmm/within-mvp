@@ -86,12 +86,12 @@ export default function ConnectPage() {
       <div className="mt-16 grid gap-16 lg:grid-cols-[.9fr_1.1fr]">
         <section>
           <h1 className="font-[family-name:var(--font-brand)] text-[54px] leading-[.98] tracking-[-.065em]">Freedom without friction.<br/><span className="control-accent text-accent">Control <span className="relative inline-block">within<svg className="within-flourish" viewBox="0 0 220 12" preserveAspectRatio="none" aria-hidden="true"><path d="M4 8.2C52 4.9 107 3.2 157 4.4c25 .6 43 1.6 59 3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span>.</span></h1>
-          <p className="mt-8 max-w-md text-[11px] leading-6 text-muted">Connect your wallet.</p>
+          <p className="mt-8 max-w-md text-[11px] leading-6 text-muted">Connect your wallet to enter the workspace.</p>
         </section>
         <div>
           <section className="rounded-[18px] border border-border bg-white p-7">
             <div className="flex items-start justify-between gap-4">
-              <div><p className="text-[9px] uppercase tracking-[.12em] text-faint">Wallet connection</p><h2 className="mt-4 text-[24px] tracking-[-.04em]">Connect your wallet</h2></div>
+              <div><p className="text-[9px] uppercase tracking-[.12em] text-faint">Wallet connection</p><h2 className="mt-4 text-[24px] tracking-[-.04em]">Choose your wallet</h2></div>
               <NetworkStatus address={wallet.address} chainId={wallet.chainId}/>
             </div>
             <dl className="mt-6 divide-y divide-border border-y border-border text-[10px]">
