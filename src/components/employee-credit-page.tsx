@@ -71,16 +71,19 @@ export function EmployeeCreditPage() {
   const [reviewed, setReviewed] = useState(false);
   const [prepared, setPrepared] = useState<PreparedEmployeeCreditWrite | null>(null);
   const [evidence, setEvidence] = useState<EmployeeCreditEvidence | null>(null);
+  const [approvalEvidence, setApprovalEvidence] = useState<EmployeeCreditEvidence | null>(null);
   const [transactionState, setTransactionState] = useState<CreditTransactionState>("idle");
   const [currentTransactionHash, setCurrentTransactionHash] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [employeeUsdcBalance, setEmployeeUsdcBalance] = useState<bigint | null>(null);
+  const [repaymentDetailsLoading, setRepaymentDetailsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const refreshGeneration = useRef(0);
   const submitting = useRef(false);
   const evidenceInitialized = useRef(false);
   const walletInitialized = useRef(false);
+  const repaymentPreparationGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
     const generation = ++refreshGeneration.current;
@@ -179,7 +182,9 @@ export function EmployeeCreditPage() {
 
   useEffect(() => {
     if (walletInitialized.current) {
+      repaymentPreparationGeneration.current += 1;
       setPrepared(null);
+      setApprovalEvidence(null);
       setTransactionState("idle");
       setCurrentTransactionHash(null);
       setReviewed(false);
@@ -190,19 +195,50 @@ export function EmployeeCreditPage() {
     void refresh();
   }, [account, chainId, provider, refresh]);
 
+  async function prepareRepaymentStep(
+    liveAccount: EmployeeCreditSnapshot["account"],
+    liveAllowance: bigint,
+  ) {
+    if (!provider || !liveAccount.active || liveAccount.outstanding <= BigInt(0)) return;
+    const due = nextEmployeeCreditInstalment(liveAccount);
+    const next = employeeCreditRepaymentStep(liveAccount, liveAllowance) === "approve"
+      ? await prepareEmployeeCreditApproval(provider, due)
+      : await prepareEmployeeCreditRepayment(provider, liveAccount);
+    setPrepared(next);
+    setTransactionState("prepared");
+    setCurrentTransactionHash(null);
+    setMessage(next.kind === "approve" ? "Step 1 of 2 — Approve USDC" : "Confirm repayment");
+  }
+
   async function openRepayment() {
+    const generation = ++repaymentPreparationGeneration.current;
     setDrawer("repay");
     setPrepared(null);
+    setApprovalEvidence(null);
     setTransactionState("idle");
     setCurrentTransactionHash(null);
     setMessage("");
+    setAllowance(null);
+    setEmployeeUsdcBalance(null);
     if (account && creditAccount.value?.active && creditAccount.value.outstanding > BigInt(0)) {
-      const [nextAllowance, nextBalance] = await Promise.allSettled([
-        readEmployeeCreditAllowance(account),
-        readEmployeeUsdcBalance(account),
-      ]);
-      setAllowance(nextAllowance.status === "fulfilled" ? nextAllowance.value : null);
-      setEmployeeUsdcBalance(nextBalance.status === "fulfilled" ? nextBalance.value : null);
+      setRepaymentDetailsLoading(true);
+      try {
+        const [nextAllowance, nextBalance] = await Promise.allSettled([
+          readEmployeeCreditAllowance(account),
+          readEmployeeUsdcBalance(account),
+        ]);
+        if (repaymentPreparationGeneration.current !== generation) return;
+        const liveAllowance = nextAllowance.status === "fulfilled" ? nextAllowance.value : null;
+        setAllowance(liveAllowance);
+        setEmployeeUsdcBalance(nextBalance.status === "fulfilled" ? nextBalance.value : null);
+        if (liveAllowance !== null) await prepareRepaymentStep(creditAccount.value, liveAllowance);
+      } catch (error) {
+        if (repaymentPreparationGeneration.current === generation) {
+          setMessage(error instanceof Error ? error.message : "Repayment preparation failed.");
+        }
+      } finally {
+        if (repaymentPreparationGeneration.current === generation) setRepaymentDetailsLoading(false);
+      }
     }
   }
 
@@ -236,16 +272,9 @@ export function EmployeeCreditPage() {
 
   async function prepareRepayment() {
     const liveAccount = creditAccount.value;
-    if (!provider || !liveAccount?.active || liveAccount.outstanding <= BigInt(0)) return;
+    if (!provider || !liveAccount?.active || liveAccount.outstanding <= BigInt(0) || allowance === null) return;
     try {
-      const due = nextEmployeeCreditInstalment(liveAccount);
-      const next = employeeCreditRepaymentStep(liveAccount, allowance ?? BigInt(0)) === "approve"
-        ? await prepareEmployeeCreditApproval(provider, due)
-        : await prepareEmployeeCreditRepayment(provider, liveAccount);
-      setPrepared(next);
-      setTransactionState("prepared");
-      setCurrentTransactionHash(null);
-      setMessage(next.kind === "approve" ? "USDC approval prepared. Repayment remains a separate transaction." : "Repayment prepared — not submitted.");
+      await prepareRepaymentStep(liveAccount, allowance);
     } catch (error) {
       setPrepared(null);
       setMessage(error instanceof Error ? error.message : "Preparation failed.");
@@ -285,6 +314,10 @@ export function EmployeeCreditPage() {
       setEvidence(confirmed);
       setTransactionState(confirmed.status);
       sessionStorage.setItem(EMPLOYEE_CREDIT_EVIDENCE_KEY, JSON.stringify(confirmed));
+      if (confirmed.status !== "confirmed") {
+        setMessage("Transaction failed on Arc Testnet.");
+        return;
+      }
       const currentAccount = account;
       if (currentAccount) {
         const nextAccount = await readEmployeeCreditAccount(currentAccount);
@@ -306,11 +339,24 @@ export function EmployeeCreditPage() {
         }
         void refresh();
         if (prepared.kind === "approve") {
-          setAllowance(await readEmployeeCreditAllowance(currentAccount));
-          setPrepared(null);
+          const refreshedAllowance = await readEmployeeCreditAllowance(currentAccount);
+          setAllowance(refreshedAllowance);
+          setApprovalEvidence(confirmed);
           setEvidence(null);
           sessionStorage.removeItem(EMPLOYEE_CREDIT_EVIDENCE_KEY);
-          setMessage("USDC approval confirmed. Prepare the repayment as a separate transaction.");
+          const due = nextEmployeeCreditInstalment(nextAccount);
+          if (refreshedAllowance < due) {
+            setPrepared(null);
+            setTransactionState("idle");
+            setCurrentTransactionHash(null);
+            setMessage("USDC approval confirmed, but the refreshed allowance is still insufficient.");
+          } else {
+            const repayment = await prepareEmployeeCreditRepayment(provider, nextAccount);
+            setPrepared(repayment);
+            setTransactionState("prepared");
+            setCurrentTransactionHash(null);
+            setMessage("Step 2 of 2 — Confirm repayment");
+          }
         } else {
           setMessage(
             prepared.kind === "draw" ? "Credit received on Arc Testnet." :
@@ -455,7 +501,9 @@ export function EmployeeCreditPage() {
       </>:creditAccount.value?.active&&creditAccount.value.outstanding>BigInt(0)?<>
         <p className="mt-8 text-[10px] text-muted">Early repayment is available. You can repay this instalment early.</p>
         <dl className="mt-6 divide-y divide-border border-y border-border text-[10px]"><div className="flex justify-between py-4"><dt className="text-muted">Outstanding balance</dt><dd>{employeeUsdc(creditAccount.value.outstanding)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Next repayment amount</dt><dd>{employeeUsdc(nextPayment)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Next due date</dt><dd>{dateLabel(creditAccount.value.nextDueDate)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Instalments paid</dt><dd>{creditAccount.value.instalmentsPaid}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Total instalments</dt><dd>{creditAccount.value.totalInstalments}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Employee USDC balance</dt><dd>{employeeUsdcBalance===null?"Unavailable":employeeUsdc(employeeUsdcBalance)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Current USDC allowance</dt><dd>{allowance===null?"Unavailable":employeeUsdc(allowance)}</dd></div></dl>
-        {!prepared&&<Button variant="primary" className="mt-7 w-full" onClick={()=>void prepareRepayment()}>{(allowance??BigInt(0))<nextPayment?"Prepare USDC approval":"Prepare repayment"}</Button>}
+        {repaymentDetailsLoading&&<p className="mt-5 text-[10px] text-muted">Checking allowance…</p>}
+        {!prepared&&!repaymentDetailsLoading&&allowance!==null&&<Button variant="primary" className="mt-7 w-full" onClick={()=>void prepareRepayment()}>{allowance<nextPayment?"Prepare USDC approval":"Prepare repayment"}</Button>}
+        {approvalEvidence&&<div className="mt-5 border-t border-border pt-4 text-[10px] text-muted"><p>USDC approval confirmed</p><a className="mt-2 block break-all text-accent" href={`${ARC_TESTNET.explorerUrl}/tx/${approvalEvidence.transactionHash}`} target="_blank" rel="noreferrer">{approvalEvidence.transactionHash}</a></div>}
       </>:<p className="mt-8 text-[10px] text-muted">No active employee credit.</p>}
       {prepared&&<dl className="mt-8 divide-y divide-border border-y border-border text-[10px]">{[
         ["Connected wallet",prepared.sender],["Transaction target",prepared.contract],["Pool recipient",prepared.kind==="fund"?EMPLOYEE_CREDIT_CONTRACT??"Not configured":"—"],["Amount",employeeUsdc(prepared.rawAmount)],["Raw amount",prepared.rawAmount.toString()],["Native value","0"],["Instalments",prepared.instalments?.toString()??"—"],["First due date",prepared.firstDueDate?dateLabel(prepared.firstDueDate):"—"],["Estimated instalment",prepared.instalments?employeeUsdc((prepared.rawAmount+BigInt(prepared.instalments)-BigInt(1))/BigInt(prepared.instalments)):employeeUsdc(prepared.rawAmount)],["Gas estimate",prepared.gas.toString()],["Estimated total cost",prepared.estimatedCost],["Network","Arc Testnet"],

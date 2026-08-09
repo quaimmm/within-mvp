@@ -276,6 +276,12 @@ test("USDC approval and repayment are separate prepared transactions", async () 
   assert.notEqual(approval.contract, repayment.contract);
   assert.equal(approvalWallet.methods.includes("eth_sendTransaction"), false);
   assert.equal(repaymentWallet.methods.includes("eth_sendTransaction"), false);
+
+  const page = await readFile(new URL("../src/components/employee-credit-page.tsx", import.meta.url), "utf8");
+  assert.match(page, /Step 1 of 2 — Approve USDC/);
+  assert.match(page, /Step 2 of 2 — Confirm repayment/);
+  assert.match(page, /await recoverEmployeeCreditEvidence\(submitted\)/);
+  assert.match(page, /const repayment = await prepareEmployeeCreditRepayment\(provider, nextAccount\)/);
 });
 
 test("active credit uses one shared account, allows early repayment, and calculates the next amount", async () => {
