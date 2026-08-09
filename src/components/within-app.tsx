@@ -64,7 +64,7 @@ function Brand() {
   );
 }
 
-function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (page: Page) => void }) {
+function Sidebar({ page, companyName, onNavigate }: { page: Page; companyName: string; onNavigate: (page: Page) => void }) {
   return (
     <aside className="fixed inset-y-0 left-0 z-20 flex w-[224px] flex-col border-r border-border bg-sidebar">
       <Brand />
@@ -92,7 +92,7 @@ function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (page: Page) =>
         <button className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border hover:bg-white/55">
           <span className="grid size-8 place-items-center rounded-full bg-ink text-[10px] font-medium text-white">NL</span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-medium text-ink">Northstar Labs</span>
+            <span className="block truncate text-xs font-medium text-ink">{companyName}</span>
             <span className="mt-0.5 block text-[10px] text-muted">Company workspace</span>
           </span>
           <ChevronDownIcon className="size-3.5 text-faint" />
@@ -708,7 +708,7 @@ export default function WithinApp() {
 
   return (
     <div className={`min-h-screen min-w-[1024px] bg-canvas text-ink ${introMode !== "ready" ? `app-entry app-entry-${introMode}` : ""}`}>
-      <Sidebar page={page} onNavigate={setPage} />
+      <Sidebar page={page} companyName={demoState.company.companyName} onNavigate={setPage} />
       {page !== "Credit" && <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>}
       <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
       <main className="ml-[224px] flex min-h-screen flex-col pt-[72px]">

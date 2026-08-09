@@ -13,6 +13,9 @@ test("authenticated shell exposes truthful wallet states and official links", as
 
   assert.match(source, /<Link href="\/" aria-label="Go to Within home"/);
   assert.match(source, /<BrandLogo variant="app" \/>/);
+  assert.match(source, /<Sidebar page=\{page\} companyName=\{demoState\.company\.companyName\}/);
+  assert.match(source, />\{companyName\}<\/span>/);
+  assert.doesNotMatch(source, /text-ink">Northstar Labs<\/span>/);
   assert.doesNotMatch(source, /window\.location/);
   assert.match(source, /https:\/\/faucet\.circle\.com\//);
   assert.match(source, /onArc \? "Arc Testnet" : "Wrong network"/);
