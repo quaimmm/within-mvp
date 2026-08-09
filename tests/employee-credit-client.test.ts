@@ -262,8 +262,24 @@ test("stale submission without a real hash is discarded and wallet cancellation 
 
 test("opening a new credit form clears the current transaction boundary", async () => {
   const page = await readFile(new URL("../src/components/employee-credit-page.tsx", import.meta.url), "utf8");
-  assert.match(page, /setDrawer\("draw"\);setReviewed\(false\);setPrepared\(null\);setTransactionState\("idle"\);setCurrentTransactionHash\(null\)/);
+  assert.match(page, /setDrawer\("draw"\);setFirstDueDate\(null\);setReviewed\(false\);setPrepared\(null\);setTransactionState\("idle"\);setCurrentTransactionHash\(null\)/);
   assert.doesNotMatch(page, /disabled=\{evidence\?\.status===["']submitted["']\}/);
+});
+
+test("MVP credit UI hides contract scheduling details and generates a safe due date", async () => {
+  const page = await readFile(new URL("../src/components/employee-credit-page.tsx", import.meta.url), "utf8");
+  assert.match(page, /DEFAULT_FIRST_REPAYMENT_DELAY_SECONDS = BigInt\(30 \* 24 \* 60 \* 60\)/);
+  assert.match(page, /BigInt\(Math\.floor\(Date\.now\(\) \/ 1_000\)\) \+ DEFAULT_FIRST_REPAYMENT_DELAY_SECONDS/);
+  assert.match(page, /Repayment count/);
+  assert.match(page, /1 repayment/);
+  assert.match(page, /2 repayments/);
+  assert.match(page, /3 repayments/);
+  assert.doesNotMatch(page, />First payment date</);
+  assert.doesNotMatch(page, />Next due date</);
+  assert.doesNotMatch(page, />Latest Arc block</);
+  assert.doesNotMatch(page, />Connected employee</);
+  assert.doesNotMatch(page, />Contract</);
+  assert.match(page, /value: result\.value \?\? current\.value/);
 });
 
 test("USDC approval and repayment are separate prepared transactions", async () => {
@@ -425,5 +441,5 @@ test("confirmed repayment waits for its receipt and rereads state at the receipt
   assert.equal(calls.slice(1).every(({ blockNumber }) => blockNumber === receiptBlock), true);
 
   const page = await readFile(new URL("../src/components/employee-credit-page.tsx", import.meta.url), "utf8");
-  assert.match(page, /if \(prepared\.kind !== "repay"\) void refresh\(\)/);
+  assert.match(page, /if \(prepared\.kind !== "repay" && prepared\.kind !== "draw"\) void refresh\(\)/);
 });

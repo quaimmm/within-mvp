@@ -18,7 +18,6 @@ import {
   nextEmployeeCreditInstalment,
   prepareEmployeeCreditApproval,
   prepareEmployeeCreditDraw,
-  prepareEmployeeCreditFunding,
   prepareEmployeeCreditRepayment,
   readArcLatestBlock,
   readArcPublicChainId,
@@ -29,7 +28,6 @@ import {
   readEmployeeCreditEligibility,
   readEmployeeCreditLimit,
   readEmployeeCreditPool,
-  readEmployeeCreditTokenBalance,
   readEmployeeUsdcBalance,
   recoverEmployeeCreditEvidence,
   restoreEmployeeCreditEvidence,
@@ -41,17 +39,14 @@ import {
   type PreparedEmployeeCreditWrite,
 } from "@/lib/credit/employee-credit-client";
 
-type Drawer = "draw" | "repay" | "fund" | null;
+type Drawer = "draw" | "repay" | null;
 type ReadState = "idle" | "loading" | "success" | "error";
 type FieldState<T> = { status: ReadState; value: T | null; error: string };
 const inputClass = "mt-2 h-10 w-full rounded-lg border border-border bg-white px-3 text-[11px] outline-none focus:border-accent";
 const emptyField = <T,>(): FieldState<T> => ({ status: "idle", value: null, error: "" });
 const ARC_READ_SPACING_MS = 1_100;
 
-function dateLabel(timestamp: bigint) {
-  if (timestamp === BigInt(0)) return "—";
-  return new Date(Number(timestamp) * 1_000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+const DEFAULT_FIRST_REPAYMENT_DELAY_SECONDS = BigInt(30 * 24 * 60 * 60);
 
 export function EmployeeCreditPage() {
   const walletSession = useWallet();
@@ -68,7 +63,7 @@ export function EmployeeCreditPage() {
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [amount, setAmount] = useState("750");
   const [instalments, setInstalments] = useState(3);
-  const [firstDueDate, setFirstDueDate] = useState("");
+  const [firstDueDate, setFirstDueDate] = useState<bigint | null>(null);
   const [reviewed, setReviewed] = useState(false);
   const [prepared, setPrepared] = useState<PreparedEmployeeCreditWrite | null>(null);
   const [evidence, setEvidence] = useState<EmployeeCreditEvidence | null>(null);
@@ -92,7 +87,7 @@ export function EmployeeCreditPage() {
       setter: Dispatch<SetStateAction<FieldState<T>>>,
       read: () => Promise<T>,
     ) => {
-      setter({ status: "loading", value: null, error: "" });
+      setter((current) => ({ status: "loading", value: current.value, error: "" }));
       let result: FieldState<T> = { status: "error", value: null, error: "Unknown Arc RPC error." };
       try {
         result = { status: "success", value: await read(), error: "" };
@@ -104,7 +99,9 @@ export function EmployeeCreditPage() {
         };
       } finally {
         // Every individual read leaves loading, and an older refresh cannot overwrite a newer one.
-        if (refreshGeneration.current === generation) setter(result);
+        if (refreshGeneration.current === generation) {
+          setter((current) => ({ ...result, value: result.value ?? current.value }));
+        }
       }
     };
 
@@ -243,31 +240,22 @@ export function EmployeeCreditPage() {
     }
   }
 
-  function reviewCredit() {
-    if (!snapshot || !firstDueDate) return setMessage("Choose a first payment date.");
+  async function reviewCredit() {
+    if (!provider || !snapshot) return;
+    const dueDate = BigInt(Math.floor(Date.now() / 1_000)) + DEFAULT_FIRST_REPAYMENT_DELAY_SECONDS;
     try {
-      validateEmployeeCreditDraw(amount, instalments, BigInt(Math.floor(new Date(`${firstDueDate}T12:00:00`).getTime() / 1_000)), snapshot);
-      setReviewed(true);
-      setPrepared(null);
-      setMessage("Review complete. Prepare the transaction when ready.");
-    } catch (error) {
-      setReviewed(false);
-      setMessage(error instanceof Error ? error.message : "Credit details are invalid.");
-    }
-  }
-
-  async function prepareDraw() {
-    if (!provider || !snapshot || !firstDueDate || !reviewed) return;
-    try {
-      const dueDate = BigInt(Math.floor(new Date(`${firstDueDate}T12:00:00`).getTime() / 1_000));
+      validateEmployeeCreditDraw(amount, instalments, dueDate, snapshot);
       const next = await prepareEmployeeCreditDraw(provider, amount, instalments, dueDate, snapshot);
+      setFirstDueDate(dueDate);
+      setReviewed(true);
       setPrepared(next);
       setTransactionState("prepared");
       setCurrentTransactionHash(null);
-      setMessage("Prepared — not submitted.");
+      setMessage("Review complete. Confirm in your wallet when ready.");
     } catch (error) {
+      setReviewed(false);
       setPrepared(null);
-      setMessage(error instanceof Error ? error.message : "Preparation failed.");
+      setMessage(error instanceof Error ? error.message : "Credit details are invalid.");
     }
   }
 
@@ -279,20 +267,6 @@ export function EmployeeCreditPage() {
     } catch (error) {
       setPrepared(null);
       setMessage(error instanceof Error ? error.message : "Preparation failed.");
-    }
-  }
-
-  async function prepareFunding() {
-    if (!provider) return setMessage("Connect the funding wallet first.");
-    try {
-      const next = await prepareEmployeeCreditFunding(provider, amount);
-      setPrepared(next);
-      setTransactionState("prepared");
-      setCurrentTransactionHash(null);
-      setMessage("Funding prepared — not submitted.");
-    } catch (error) {
-      setPrepared(null);
-      setMessage(error instanceof Error ? error.message : "Funding preparation failed.");
     }
   }
 
@@ -322,26 +296,19 @@ export function EmployeeCreditPage() {
       const currentAccount = account;
       if (currentAccount) {
         const confirmedBlock = BigInt(confirmed.blockNumber ?? "0");
-        const confirmedState = prepared.kind === "repay"
+        const confirmedState = prepared.kind === "repay" || prepared.kind === "draw"
           ? await readEmployeeCreditConfirmedState(currentAccount, confirmedBlock)
           : null;
         const nextAccount = confirmedState?.account ?? await readEmployeeCreditAccount(currentAccount);
         setCreditAccount({ status: "success", value: nextAccount, error: "" });
-        if (prepared.kind === "repay") {
+        if (prepared.kind === "repay" || prepared.kind === "draw") {
           setAvailableCredit({ status: "success", value: confirmedState!.availableCredit, error: "" });
           setPoolBalance({ status: "success", value: confirmedState!.poolBalance, error: "" });
           setEmployeeUsdcBalance(confirmedState!.employeeUsdcBalance);
           setAllowance(confirmedState!.allowance);
           setLatestBlock({ status: "success", value: confirmedBlock, error: "" });
         }
-        if (prepared.kind === "fund") {
-          const [tokenBalance, contractPoolBalance] = await Promise.all([
-            readEmployeeCreditTokenBalance(),
-            readEmployeeCreditPool(),
-          ]);
-          if (tokenBalance !== contractPoolBalance) throw new Error("Pool balance verification did not match the USDC token balance.");
-        }
-        if (prepared.kind !== "repay") void refresh();
+        if (prepared.kind !== "repay" && prepared.kind !== "draw") void refresh();
         if (prepared.kind === "approve") {
           const refreshedAllowance = await readEmployeeCreditAllowance(currentAccount);
           setAllowance(refreshedAllowance);
@@ -364,7 +331,6 @@ export function EmployeeCreditPage() {
         } else {
           setMessage(
             prepared.kind === "draw" ? "Credit received on Arc Testnet." :
-            prepared.kind === "fund" ? "Credit pool funded on Arc Testnet." :
             nextAccount.active ? "Instalment repaid on Arc Testnet." : "Credit fully repaid."
           );
         }
@@ -409,8 +375,8 @@ export function EmployeeCreditPage() {
   const active = creditAccount.status === "success" && creditAccount.value?.active === true && creditAccount.value.outstanding > BigInt(0);
   const nextPayment = active && creditAccount.value ? nextEmployeeCreditInstalment(creditAccount.value) : BigInt(0);
   const fieldLabel = (field: FieldState<bigint>, formatter = employeeUsdc) =>
+    field.value !== null ? formatter(field.value) :
     field.status === "loading" ? "Loading…" :
-    field.status === "success" && field.value !== null ? formatter(field.value) :
     "Unavailable";
   const isRefreshing = [eligibility, creditAccount, availableCredit, poolBalance, creditLimit, latestBlock, rpcChainId]
     .some((field) => field.status === "loading");
@@ -438,11 +404,11 @@ export function EmployeeCreditPage() {
   });
   const summary = [
     ["Available credit", fieldLabel(availableCredit)],
-    ["Outstanding", creditAccount.status === "loading" ? "Loading…" : creditAccount.status === "success" && creditAccount.value !== null ? employeeUsdc(creditAccount.value.outstanding) : "Unavailable"],
-    ["Next payment", active ? employeeUsdc(nextPayment) : "—"],
-    ["Repayment plan", active && creditAccount.value ? `${creditAccount.value.instalmentsPaid} of ${creditAccount.value.totalInstalments} paid` : "No active credit"],
+    ["Outstanding", creditAccount.value !== null ? employeeUsdc(creditAccount.value.outstanding) : creditAccount.status === "loading" ? "Loading…" : "Unavailable"],
+    ["Next repayment", active ? employeeUsdc(nextPayment) : "—"],
+    ["Eligibility", eligibility.value !== null ? eligibility.value ? "Eligible" : "Not eligible" : eligibility.status === "loading" ? "Checking…" : "Unavailable"],
+    ["Repayment progress", active && creditAccount.value ? `${creditAccount.value.instalmentsPaid} / ${creditAccount.value.totalInstalments}` : "No active credit"],
     ["Pool liquidity", fieldLabel(poolBalance)],
-    ["Latest Arc block", fieldLabel(latestBlock, (value) => value.toString())],
   ];
   const diagnosticErrors: Array<[string, FieldState<unknown>]> = [
     ["Eligibility", eligibility],
@@ -459,9 +425,8 @@ export function EmployeeCreditPage() {
       <SectionTitle title="Employee Credit" description="Simple employee credit, settled on Arc Testnet."/>
       <div className="flex gap-3">
         <Button onClick={()=>void refresh()} disabled={isRefreshing}>{isRefreshing?"Refreshing…":"Refresh"}</Button>
-        <Button onClick={()=>{setDrawer("fund");setAmount("5");setPrepared(null);setTransactionState("idle");setCurrentTransactionHash(null);setMessage("");}}>Fund pool</Button>
         <Button onClick={()=>void openRepayment()} disabled={!active}>Make repayment</Button>
-        <Button variant="primary" onClick={()=>{setDrawer("draw");setReviewed(false);setPrepared(null);setTransactionState("idle");setCurrentTransactionHash(null);setMessage("");}} disabled={!snapshot?.eligible||active||snapshot.poolBalance===BigInt(0)}>Use credit</Button>
+        <Button variant="primary" onClick={()=>{setDrawer("draw");setFirstDueDate(null);setReviewed(false);setPrepared(null);setTransactionState("idle");setCurrentTransactionHash(null);setMessage("");}} disabled={!snapshot?.eligible||active||snapshot.poolBalance===BigInt(0)}>Use credit</Button>
       </div>
     </div>
     {!EMPLOYEE_CREDIT_CONTRACT&&<p className="mt-9 text-[10px] text-muted">Employee Credit is awaiting its Arc Testnet deployment.</p>}
@@ -472,8 +437,6 @@ export function EmployeeCreditPage() {
     </section>
     <dl className="mt-12 divide-y divide-border border-y border-border text-[10px]">
       {summary.slice(3).map(([label,value])=><div key={label} className="flex justify-between py-4"><dt className="text-muted">{label}</dt><dd>{value}</dd></div>)}
-      <div className="flex justify-between gap-8 py-4"><dt className="text-muted">Connected employee</dt><dd className="break-all text-right">{account??"Not connected"}</dd></div>
-      <div className="flex justify-between gap-8 py-4"><dt className="text-muted">Contract</dt><dd className="break-all text-right">{EMPLOYEE_CREDIT_CONTRACT??"Not deployed"}</dd></div>
     </dl>
     {!active&&<p className="mt-8 text-[10px] text-muted">No active employee credit.</p>}
     {process.env.NODE_ENV === "development" && <details className="mt-8 border-t border-border pt-5 text-[9px] text-muted">
@@ -490,27 +453,22 @@ export function EmployeeCreditPage() {
         )}
       </dl>
     </details>}
-    {evidence?<section className="mt-14 border-t border-border pt-7"><p className="text-[13px]">{evidence.status==="confirmed"?"Transaction confirmed on Arc Testnet":evidence.status==="failed"?"Transaction failed on Arc Testnet":"Transaction submitted · Awaiting confirmation"}</p><a className="mt-3 block break-all text-[10px] text-accent" href={`${ARC_TESTNET.explorerUrl}/tx/${evidence.transactionHash}`} target="_blank" rel="noreferrer">{evidence.transactionHash}</a>{evidence.blockNumber&&<p className="mt-2 text-[10px] text-muted">Block {evidence.blockNumber}</p>}{evidence.status==="submitted"&&<Button className="mt-4" onClick={()=>void recover(evidence)}>Check status</Button>}</section>:<p className="mt-14 border-t border-border pt-7 text-[10px] text-muted">No locally recorded transactions on this device.</p>}
+    {evidence&&<section className="mt-14 border-t border-border pt-7"><p className="text-[12px]">{evidence.status==="confirmed"?"Transaction confirmed":evidence.status==="failed"?"Transaction failed":"Transaction awaiting confirmation"}</p><a className="mt-2 inline-block text-[10px] text-accent" href={`${ARC_TESTNET.explorerUrl}/tx/${evidence.transactionHash}`} target="_blank" rel="noreferrer">View on ArcScan</a>{evidence.status==="submitted"&&<Button className="ml-4" onClick={()=>void recover(evidence)}>Check status</Button>}</section>}
     {drawer&&<><button aria-label="Close credit drawer" className="fixed inset-y-0 left-[224px] right-0 top-[72px] z-30 bg-ink/10" onClick={()=>setDrawer(null)}/><aside className="fixed bottom-0 right-0 top-[72px] z-40 w-[520px] overflow-y-auto border-l border-border bg-white p-8 shadow-[-24px_0_70px_rgba(23,24,21,.08)]">
-      <div className="flex justify-between"><h2 className="text-[28px]">{drawer==="draw"?"Use credit":drawer==="fund"?"Fund credit pool":"Make repayment"}</h2><button aria-label="Close drawer" onClick={()=>setDrawer(null)}>×</button></div>
-      {drawer==="fund"?<>
-        <p className="mt-8 text-[10px] leading-5 text-muted">Transfer USDC to the Employee Credit pool. Arc gas remains separate from the transfer amount.</p>
-        <label className="mt-6 block text-[10px] text-muted">Amount<input className={inputClass} value={amount} onChange={(event)=>{setAmount(event.target.value);setPrepared(null);setMessage("");}}/></label>
-        {!prepared&&<Button variant="primary" className="mt-7 w-full" onClick={()=>void prepareFunding()}>Prepare funding</Button>}
-      </>:drawer==="draw"?<>
+      <div className="flex justify-between"><h2 className="text-[28px]">{drawer==="draw"?"Use credit":"Make repayment"}</h2><button aria-label="Close drawer" onClick={()=>setDrawer(null)}>×</button></div>
+      {drawer==="draw"?<>
         <label className="mt-8 block text-[10px] text-muted">Amount<input className={inputClass} value={amount} onChange={(event)=>{setAmount(event.target.value);setReviewed(false);setPrepared(null);}}/></label>
-        <label className="mt-5 block text-[10px] text-muted">Repayment plan<select className={inputClass} value={instalments} onChange={(event)=>{setInstalments(Number(event.target.value));setReviewed(false);setPrepared(null);}}><option value={1}>Next payday</option><option value={2}>2 monthly instalments</option><option value={3}>3 monthly instalments</option></select></label>
-        <label className="mt-5 block text-[10px] text-muted">First payment date<input type="date" className={inputClass} value={firstDueDate} onChange={(event)=>{setFirstDueDate(event.target.value);setReviewed(false);setPrepared(null);}}/></label>
-        {!reviewed?<Button variant="primary" className="mt-7 w-full" onClick={reviewCredit}>Review credit</Button>:!prepared?<Button variant="primary" className="mt-7 w-full" onClick={()=>void prepareDraw()}>Prepare transaction</Button>:null}
+        <label className="mt-5 block text-[10px] text-muted">Repayment count<select className={inputClass} value={instalments} onChange={(event)=>{setInstalments(Number(event.target.value));setFirstDueDate(null);setReviewed(false);setPrepared(null);}}><option value={1}>1 repayment</option><option value={2}>2 repayments</option><option value={3}>3 repayments</option></select></label>
+        {!reviewed&&!prepared?<Button variant="primary" className="mt-7 w-full" onClick={()=>void reviewCredit()}>Review credit</Button>:null}
       </>:creditAccount.value?.active&&creditAccount.value.outstanding>BigInt(0)?<>
         <p className="mt-8 text-[10px] text-muted">Early repayment is available. You can repay this instalment early.</p>
-        <dl className="mt-6 divide-y divide-border border-y border-border text-[10px]"><div className="flex justify-between py-4"><dt className="text-muted">Outstanding balance</dt><dd>{employeeUsdc(creditAccount.value.outstanding)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Next repayment amount</dt><dd>{employeeUsdc(nextPayment)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Next due date</dt><dd>{dateLabel(creditAccount.value.nextDueDate)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Instalments paid</dt><dd>{creditAccount.value.instalmentsPaid}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Total instalments</dt><dd>{creditAccount.value.totalInstalments}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Employee USDC balance</dt><dd>{employeeUsdcBalance===null?"Unavailable":employeeUsdc(employeeUsdcBalance)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Current USDC allowance</dt><dd>{allowance===null?"Unavailable":employeeUsdc(allowance)}</dd></div></dl>
+        <dl className="mt-6 divide-y divide-border border-y border-border text-[10px]"><div className="flex justify-between py-4"><dt className="text-muted">Outstanding</dt><dd>{employeeUsdc(creditAccount.value.outstanding)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Next repayment</dt><dd>{employeeUsdc(nextPayment)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Repayment progress</dt><dd>{creditAccount.value.instalmentsPaid} / {creditAccount.value.totalInstalments}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">USDC balance</dt><dd>{employeeUsdcBalance===null?"Unavailable":employeeUsdc(employeeUsdcBalance)}</dd></div></dl>
         {repaymentDetailsLoading&&<p className="mt-5 text-[10px] text-muted">Checking allowance…</p>}
         {!prepared&&!repaymentDetailsLoading&&allowance!==null&&<Button variant="primary" className="mt-7 w-full" onClick={()=>void prepareRepayment()}>{allowance<nextPayment?"Prepare USDC approval":"Prepare repayment"}</Button>}
-        {approvalEvidence&&<div className="mt-5 border-t border-border pt-4 text-[10px] text-muted"><p>USDC approval confirmed</p><a className="mt-2 block break-all text-accent" href={`${ARC_TESTNET.explorerUrl}/tx/${approvalEvidence.transactionHash}`} target="_blank" rel="noreferrer">{approvalEvidence.transactionHash}</a></div>}
+        {approvalEvidence&&<p className="mt-5 text-[10px] text-muted">USDC approved. Continue to repayment.</p>}
       </>:<p className="mt-8 text-[10px] text-muted">No active employee credit.</p>}
       {prepared&&<dl className="mt-8 divide-y divide-border border-y border-border text-[10px]">{[
-        ["Connected wallet",prepared.sender],["Transaction target",prepared.contract],["Pool recipient",prepared.kind==="fund"?EMPLOYEE_CREDIT_CONTRACT??"Not configured":"—"],["Amount",employeeUsdc(prepared.rawAmount)],["Raw amount",prepared.rawAmount.toString()],["Native value","0"],["Instalments",prepared.instalments?.toString()??"—"],["First due date",prepared.firstDueDate?dateLabel(prepared.firstDueDate):"—"],["Estimated instalment",prepared.instalments?employeeUsdc((prepared.rawAmount+BigInt(prepared.instalments)-BigInt(1))/BigInt(prepared.instalments)):employeeUsdc(prepared.rawAmount)],["Gas estimate",prepared.gas.toString()],["Estimated total cost",prepared.estimatedCost],["Network","Arc Testnet"],
+        ["Amount",employeeUsdc(prepared.rawAmount)],["Repayment count",prepared.instalments?.toString()??"—"],["Next repayment",prepared.instalments?employeeUsdc((prepared.rawAmount+BigInt(prepared.instalments)-BigInt(1))/BigInt(prepared.instalments)):employeeUsdc(prepared.rawAmount)],["Network","Arc Testnet"],
       ].map(([label,value])=><div key={label} className="grid grid-cols-[130px_1fr] gap-5 py-4"><dt className="text-muted">{label}</dt><dd className="break-all">{value}</dd></div>)}</dl>}
       {prepared&&<Button variant="primary" className="mt-7 w-full" onClick={()=>void confirmPrepared()} disabled={!confirmEnabled}>{transactionState==="walletPending"?"Waiting for wallet…":prepared.kind==="draw"?"Confirm credit in wallet":prepared.kind==="approve"?"Approve USDC in wallet":prepared.kind==="fund"?"Confirm funding in wallet":"Confirm repayment in wallet"}</Button>}
       {prepared&&!currentTransactionHash&&(transactionState==="failed"||transactionState==="cancelled")&&<Button className="mt-3 w-full" onClick={resetPreparedTransaction}>Reset prepared transaction</Button>}
