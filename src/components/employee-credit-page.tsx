@@ -432,7 +432,7 @@ export function EmployeeCreditPage() {
       </div>
     </div>
     {!EMPLOYEE_CREDIT_CONTRACT&&<p className="mt-9 text-[10px] text-muted">Employee Credit is awaiting its Arc Testnet deployment.</p>}
-    {account&&eligibility.status==="success"&&!eligibility.value&&<p className="mt-9 text-[10px] text-muted">This wallet is not eligible for employee credit.</p>}
+    {account&&eligibility.status==="success"&&!eligibility.value&&<p className="mt-9 text-[10px] text-muted">This wallet is not eligible for Employee Credit. Eligibility is managed onchain by the company.</p>}
     {eligibility.value===true&&poolBalance.status==="success"&&poolBalance.value===BigInt(0)&&<p className="mt-9 text-[10px] text-muted">Credit is available, but the pool must be funded before it can be used.</p>}
     <section className="mt-14 grid grid-cols-3 divide-x divide-border border-y border-border py-8">
       {summary.slice(0,3).map(([label,value],index)=><div key={label} className={index===0?"pr-8":"px-8"}><p className="text-[9px] text-muted">{label}</p><p className="mt-3 text-[17px]">{value}</p></div>)}
