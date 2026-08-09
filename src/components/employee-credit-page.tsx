@@ -25,6 +25,7 @@ import {
   readEmployeeCreditAccount,
   readEmployeeCreditAllowance,
   readEmployeeCreditAvailable,
+  readEmployeeCreditConfirmedState,
   readEmployeeCreditEligibility,
   readEmployeeCreditLimit,
   readEmployeeCreditPool,
@@ -320,15 +321,18 @@ export function EmployeeCreditPage() {
       }
       const currentAccount = account;
       if (currentAccount) {
-        const nextAccount = await readEmployeeCreditAccount(currentAccount);
+        const confirmedBlock = BigInt(confirmed.blockNumber ?? "0");
+        const confirmedState = prepared.kind === "repay"
+          ? await readEmployeeCreditConfirmedState(currentAccount, confirmedBlock)
+          : null;
+        const nextAccount = confirmedState?.account ?? await readEmployeeCreditAccount(currentAccount);
         setCreditAccount({ status: "success", value: nextAccount, error: "" });
         if (prepared.kind === "repay") {
-          const nextAvailable = await readEmployeeCreditAvailable(currentAccount);
-          const nextPool = await readEmployeeCreditPool();
-          setAvailableCredit({ status: "success", value: nextAvailable, error: "" });
-          setPoolBalance({ status: "success", value: nextPool, error: "" });
-          setEmployeeUsdcBalance(await readEmployeeUsdcBalance(currentAccount));
-          setAllowance(await readEmployeeCreditAllowance(currentAccount));
+          setAvailableCredit({ status: "success", value: confirmedState!.availableCredit, error: "" });
+          setPoolBalance({ status: "success", value: confirmedState!.poolBalance, error: "" });
+          setEmployeeUsdcBalance(confirmedState!.employeeUsdcBalance);
+          setAllowance(confirmedState!.allowance);
+          setLatestBlock({ status: "success", value: confirmedBlock, error: "" });
         }
         if (prepared.kind === "fund") {
           const [tokenBalance, contractPoolBalance] = await Promise.all([
@@ -337,7 +341,7 @@ export function EmployeeCreditPage() {
           ]);
           if (tokenBalance !== contractPoolBalance) throw new Error("Pool balance verification did not match the USDC token balance.");
         }
-        void refresh();
+        if (prepared.kind !== "repay") void refresh();
         if (prepared.kind === "approve") {
           const refreshedAllowance = await readEmployeeCreditAllowance(currentAccount);
           setAllowance(refreshedAllowance);

@@ -98,6 +98,7 @@ type ReadClient = {
   getBlockNumber(): Promise<bigint>;
   getChainId(): Promise<number>;
   getTransactionReceipt(args: { hash: Hash }): Promise<TransactionReceipt>;
+  waitForTransactionReceipt?(args: { hash: Hash }): Promise<TransactionReceipt>;
   readContract(args: Record<string, unknown>): Promise<unknown>;
 };
 
@@ -170,12 +171,14 @@ export async function readEmployeeCreditAvailable(
   employee: Address,
   client: ReadClient = employeeCreditPublicClient as unknown as ReadClient,
   contractOverride?: Address,
+  blockNumber?: bigint,
 ) {
   return timedRead(() => client.readContract({
     address: requireContract(contractOverride),
     abi: withinEmployeeCreditAbi,
     functionName: "availableCredit",
     args: [employee],
+    ...(blockNumber === undefined ? {} : { blockNumber }),
   }) as Promise<bigint>);
 }
 
@@ -183,23 +186,27 @@ export async function readEmployeeCreditAccount(
   employee: Address,
   client: ReadClient = employeeCreditPublicClient as unknown as ReadClient,
   contractOverride?: Address,
+  blockNumber?: bigint,
 ) {
   return timedRead(() => client.readContract({
     address: requireContract(contractOverride),
     abi: withinEmployeeCreditAbi,
     functionName: "getCreditAccount",
     args: [employee],
+    ...(blockNumber === undefined ? {} : { blockNumber }),
   }) as Promise<EmployeeCreditAccount>);
 }
 
 export async function readEmployeeCreditPool(
   client: ReadClient = employeeCreditPublicClient as unknown as ReadClient,
   contractOverride?: Address,
+  blockNumber?: bigint,
 ) {
   return timedRead(() => client.readContract({
     address: requireContract(contractOverride),
     abi: withinEmployeeCreditAbi,
     functionName: "poolBalance",
+    ...(blockNumber === undefined ? {} : { blockNumber }),
   }) as Promise<bigint>);
 }
 
@@ -370,25 +377,45 @@ export async function readEmployeeCreditAllowance(
   employee: Address,
   client: ReadClient = employeeCreditPublicClient as unknown as ReadClient,
   contractOverride?: Address,
+  blockNumber?: bigint,
 ) {
   return timedRead(() => client.readContract({
     address: ARC_TESTNET.usdcAddress,
     abi: usdcAbi,
     functionName: "allowance",
     args: [employee, requireContract(contractOverride)],
+    ...(blockNumber === undefined ? {} : { blockNumber }),
   }) as Promise<bigint>);
 }
 
 export async function readEmployeeUsdcBalance(
   employee: Address,
   client: ReadClient = employeeCreditPublicClient as unknown as ReadClient,
+  blockNumber?: bigint,
 ) {
   return timedRead(() => client.readContract({
     address: ARC_TESTNET.usdcAddress,
     abi: usdcAbi,
     functionName: "balanceOf",
     args: [employee],
+    ...(blockNumber === undefined ? {} : { blockNumber }),
   }) as Promise<bigint>);
+}
+
+export async function readEmployeeCreditConfirmedState(
+  employee: Address,
+  blockNumber: bigint,
+  client: ReadClient = employeeCreditPublicClient as unknown as ReadClient,
+  contractOverride?: Address,
+) {
+  const [account, availableCredit, poolBalance, allowance, employeeUsdcBalance] = await Promise.all([
+    readEmployeeCreditAccount(employee, client, contractOverride, blockNumber),
+    readEmployeeCreditAvailable(employee, client, contractOverride, blockNumber),
+    readEmployeeCreditPool(client, contractOverride, blockNumber),
+    readEmployeeCreditAllowance(employee, client, contractOverride, blockNumber),
+    readEmployeeUsdcBalance(employee, client, blockNumber),
+  ]);
+  return { account, availableCredit, poolBalance, allowance, employeeUsdcBalance };
 }
 
 export function nextEmployeeCreditInstalment(account: EmployeeCreditAccount) {
@@ -456,7 +483,9 @@ export async function recoverEmployeeCreditEvidence(
   evidence: EmployeeCreditEvidence,
   client: ReadClient = employeeCreditPublicClient as unknown as ReadClient,
 ) {
-  const receipt = await client.getTransactionReceipt({ hash: evidence.transactionHash });
+  const receipt = client.waitForTransactionReceipt
+    ? await client.waitForTransactionReceipt({ hash: evidence.transactionHash })
+    : await client.getTransactionReceipt({ hash: evidence.transactionHash });
   return {
     ...evidence,
     status: receipt.status === "success" ? "confirmed" as const : "failed" as const,

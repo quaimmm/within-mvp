@@ -18,6 +18,7 @@ import {
   readArcLatestBlock,
   readEmployeeCreditAccount,
   readEmployeeCreditAvailable,
+  readEmployeeCreditConfirmedState,
   readEmployeeCreditEligibility,
   readEmployeeCreditLimit,
   readEmployeeCreditPool,
@@ -365,4 +366,64 @@ test("hash persistence and receipt retry never fabricate or resubmit", async () 
   assert.equal(confirmed.blockNumber, "777");
   assert.deepEqual(receiptMethods, ["eth_getTransactionReceipt"]);
   assert.equal(receiptMethods.includes("eth_sendTransaction"), false);
+});
+
+test("confirmed repayment waits for its receipt and rereads state at the receipt block", async () => {
+  const receiptBlock = BigInt(778);
+  const calls: Array<{ method: string; blockNumber?: bigint }> = [];
+  const repaidAccount = {
+    ...inactiveAccount,
+    active: true,
+    outstanding: BigInt(5_000_000),
+    totalBorrowed: BigInt(15_000_000),
+    totalRepaid: BigInt(10_000_000),
+    instalmentAmount: BigInt(5_000_000),
+    totalInstalments: 3,
+    instalmentsPaid: 2,
+  };
+  const client = {
+    async getBlockNumber() { return receiptBlock; },
+    async getChainId() { return 5_042_002; },
+    async getTransactionReceipt() { throw new Error("one-shot receipt lookup must not be used"); },
+    async waitForTransactionReceipt() {
+      calls.push({ method: "waitForTransactionReceipt" });
+      return { status: "success", blockNumber: receiptBlock, logs: [] };
+    },
+    async readContract(args: Record<string, unknown>) {
+      const method = String(args.functionName);
+      calls.push({ method, blockNumber: args.blockNumber as bigint | undefined });
+      if (method === "getCreditAccount") return repaidAccount;
+      if (method === "availableCredit") return BigInt(1_995_000_000);
+      if (method === "poolBalance") return BigInt(20_000_000);
+      if (method === "allowance") return BigInt(0);
+      if (method === "balanceOf") return BigInt(50_000_000);
+      throw new Error(`Unexpected ${method}`);
+    },
+  };
+  const repayment = await prepareEmployeeCreditRepayment(wallet().provider, {
+    ...repaidAccount,
+    outstanding: BigInt(10_000_000),
+    totalRepaid: BigInt(5_000_000),
+    instalmentsPaid: 1,
+  }, contract);
+  const evidence = createEmployeeCreditEvidence(repayment, `0x${"56".repeat(32)}`);
+  const confirmed = await recoverEmployeeCreditEvidence(evidence, client as never);
+  const state = await readEmployeeCreditConfirmedState(employee, receiptBlock, client as never, contract);
+
+  assert.equal(confirmed.status, "confirmed");
+  assert.equal(state.account.outstanding, BigInt(5_000_000));
+  assert.equal(state.account.totalRepaid, BigInt(10_000_000));
+  assert.equal(state.account.instalmentsPaid, 2);
+  assert.deepEqual(calls.map(({ method }) => method), [
+    "waitForTransactionReceipt",
+    "getCreditAccount",
+    "availableCredit",
+    "poolBalance",
+    "allowance",
+    "balanceOf",
+  ]);
+  assert.equal(calls.slice(1).every(({ blockNumber }) => blockNumber === receiptBlock), true);
+
+  const page = await readFile(new URL("../src/components/employee-credit-page.tsx", import.meta.url), "utf8");
+  assert.match(page, /if \(prepared\.kind !== "repay"\) void refresh\(\)/);
 });
