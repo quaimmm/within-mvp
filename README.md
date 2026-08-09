@@ -24,11 +24,7 @@ Arc executes.
 
 ## Live application
 
-**Public URL:** _Add the production URL after deployment._
-
-## Demo video
-
-**Public video:** _Add the public video URL before submission._
+**Public URL:** https://withinapp.finance
 
 ## Built on Arc
 
@@ -93,8 +89,7 @@ access tokens or server secrets in `NEXT_PUBLIC_*` variables.
 
 Latest verified local run:
 
-- Frontend: **130 passed, 0 failed**
-- Contracts: **62 passed, 0 failed** using `forge test --offline`
+- Frontend and contract test suites are maintained and passing during development.
 - ESLint: passed
 - Next.js production build: passed
 
