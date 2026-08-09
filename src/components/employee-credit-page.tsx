@@ -4,8 +4,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import type { Address } from "viem";
 import { Button } from "@/components/ui/button";
 import { SectionTitle } from "@/components/ui/section-title";
-import { restoreBrowserWallet, subscribeWallet } from "@/lib/arc/browser-wallet";
-import type { BrowserEthereumProvider } from "@/lib/arc/network";
+import { useWallet } from "@/components/wallet-provider";
 import { ARC_TESTNET } from "@/lib/arc/network";
 import { isArcTestnet } from "@/lib/arc/network";
 import {
@@ -54,9 +53,10 @@ function dateLabel(timestamp: bigint) {
 }
 
 export function EmployeeCreditPage() {
-  const [provider, setProvider] = useState<BrowserEthereumProvider | null>(null);
-  const [account, setAccount] = useState<Address | null>(null);
-  const [chainId, setChainId] = useState<string | null>(null);
+  const walletSession = useWallet();
+  const provider = walletSession.wallet.provider;
+  const account = walletSession.wallet.address as Address | null;
+  const chainId = walletSession.wallet.chainId;
   const [eligibility, setEligibility] = useState<FieldState<boolean>>(emptyField);
   const [creditAccount, setCreditAccount] = useState<FieldState<EmployeeCreditSnapshot["account"]>>(emptyField);
   const [availableCredit, setAvailableCredit] = useState<FieldState<bigint>>(emptyField);
@@ -79,12 +79,10 @@ export function EmployeeCreditPage() {
   const [message, setMessage] = useState("");
   const refreshGeneration = useRef(0);
   const submitting = useRef(false);
+  const evidenceInitialized = useRef(false);
+  const walletInitialized = useRef(false);
 
-  const refresh = useCallback(async (
-    walletProvider?: BrowserEthereumProvider | null,
-    walletAccount?: Address | null,
-    walletChainId?: string | null,
-  ) => {
+  const refresh = useCallback(async () => {
     const generation = ++refreshGeneration.current;
     const loadField = async <T,>(
       setter: Dispatch<SetStateAction<FieldState<T>>>,
@@ -119,21 +117,9 @@ export function EmployeeCreditPage() {
       await loadField(setPoolBalance, readEmployeeCreditPool);
     })();
 
-    let nextProvider = walletProvider;
-    let nextAccount = walletAccount;
-    let nextChain = walletChainId;
-    if (walletProvider === undefined) {
-      const restored = await restoreBrowserWallet();
-      nextProvider = restored?.provider ?? null;
-      nextAccount = restored?.address as Address | null ?? null;
-      nextChain = restored?.chainId ?? null;
-    }
     if (refreshGeneration.current !== generation) return;
-    setProvider(nextProvider ?? null);
-    setAccount(nextAccount ?? null);
-    setChainId(nextChain ?? null);
 
-    if (!nextAccount || !EMPLOYEE_CREDIT_CONTRACT) {
+    if (!account || !EMPLOYEE_CREDIT_CONTRACT) {
       const unavailable = {
         status: "error" as const,
         value: null,
@@ -150,13 +136,13 @@ export function EmployeeCreditPage() {
       await publicReadQueue;
       if (refreshGeneration.current !== generation) return;
       await spaceReads();
-      await loadField(setEligibility, () => readEmployeeCreditEligibility(nextAccount));
+      await loadField(setEligibility, () => readEmployeeCreditEligibility(account));
       await spaceReads();
-      await loadField(setAvailableCredit, () => readEmployeeCreditAvailable(nextAccount));
+      await loadField(setAvailableCredit, () => readEmployeeCreditAvailable(account));
       await spaceReads();
-      await loadField(setCreditAccount, () => readEmployeeCreditAccount(nextAccount));
+      await loadField(setCreditAccount, () => readEmployeeCreditAccount(account));
     })();
-  }, []);
+  }, [account]);
 
   const recover = useCallback(async (stored: EmployeeCreditEvidence) => {
     try {
@@ -173,6 +159,8 @@ export function EmployeeCreditPage() {
   }, [refresh]);
 
   useEffect(() => {
+    if (evidenceInitialized.current) return;
+    evidenceInitialized.current = true;
     queueMicrotask(() => {
       const stored = restoreEmployeeCreditEvidence(sessionStorage.getItem(EMPLOYEE_CREDIT_EVIDENCE_KEY));
       if (stored) {
@@ -186,26 +174,21 @@ export function EmployeeCreditPage() {
           setCurrentTransactionHash(stored.transactionHash);
         }
       }
-      void refresh();
     });
   }, [recover, refresh]);
 
   useEffect(() => {
-    if (!provider) return;
-    return subscribeWallet(provider, { address: account, chainId }, (next) => {
-      const nextAccount = next.address as Address | null;
-      setAccount(nextAccount);
-      setChainId(next.chainId);
+    if (walletInitialized.current) {
       setPrepared(null);
       setTransactionState("idle");
       setCurrentTransactionHash(null);
       setReviewed(false);
-      setMessage(nextAccount ? "Wallet account changed. Review and prepare again." : "Connect MetaMask to continue.");
-      void refresh(provider, nextAccount, next.chainId);
-    });
-  // The selected provider owns this listener; account and chain updates arrive through it.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider]);
+      setMessage(account ? "Wallet account or network changed. Review and prepare again." : "Connect MetaMask to continue.");
+    } else {
+      walletInitialized.current = true;
+    }
+    void refresh();
+  }, [account, chainId, provider, refresh]);
 
   async function openRepayment() {
     setDrawer("repay");
@@ -321,7 +304,7 @@ export function EmployeeCreditPage() {
           ]);
           if (tokenBalance !== contractPoolBalance) throw new Error("Pool balance verification did not match the USDC token balance.");
         }
-        void refresh(provider, currentAccount, chainId);
+        void refresh();
         if (prepared.kind === "approve") {
           setAllowance(await readEmployeeCreditAllowance(currentAccount));
           setPrepared(null);
@@ -425,7 +408,7 @@ export function EmployeeCreditPage() {
     <div className="flex items-start justify-between">
       <SectionTitle title="Employee Credit" description="Simple employee credit, settled on Arc Testnet."/>
       <div className="flex gap-3">
-        <Button onClick={()=>void refresh(provider, account, chainId)} disabled={isRefreshing}>{isRefreshing?"Refreshing…":"Refresh"}</Button>
+        <Button onClick={()=>void refresh()} disabled={isRefreshing}>{isRefreshing?"Refreshing…":"Refresh"}</Button>
         <Button onClick={()=>{setDrawer("fund");setAmount("5");setPrepared(null);setTransactionState("idle");setCurrentTransactionHash(null);setMessage("");}}>Fund pool</Button>
         <Button onClick={()=>void openRepayment()} disabled={!active}>Make repayment</Button>
         <Button variant="primary" onClick={()=>{setDrawer("draw");setReviewed(false);setPrepared(null);setTransactionState("idle");setCurrentTransactionHash(null);setMessage("");}} disabled={!snapshot?.eligible||active||snapshot.poolBalance===BigInt(0)}>Use credit</Button>

@@ -79,6 +79,8 @@ test("old Company Credit page is archived and the Employee Credit page is render
   assert.doesNotMatch(page, /demoState|Request funds|approveAndDisburse|multisig/i);
   assert.doesNotMatch(page, /full-page|Loading onchain state/);
   assert.doesNotMatch(page, /Your credit limit/);
+  assert.match(page, /const walletSession = useWallet\(\)/);
+  assert.doesNotMatch(page, /restoreBrowserWallet|subscribeWallet/);
   assert.match(page, /grid grid-cols-3 divide-x/);
   assert.match(page, /This wallet is not eligible for Employee Credit\. Eligibility is managed onchain by the company\./);
   assert.match(page, /disabled=\{!snapshot\?\.eligible\|\|active\|\|snapshot\.poolBalance===BigInt\(0\)\}/);
