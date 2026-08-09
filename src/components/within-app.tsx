@@ -39,6 +39,7 @@ import { restoreBrowserWallet } from "@/lib/arc/browser-wallet";
 import { ARC_POLICY_ACTIVATION_STORAGE_KEY, ARC_POLICY_CONTRACT, confirmPolicyState, confirmPolicyStateForId, preparePolicyActivation, submitPolicyActivation, type PreparedPolicyActivation } from "@/lib/policies/arc-policy-activation";
 import { ARC_TESTNET, isArcTestnet, shortenAddress, type BrowserEthereumProvider } from "@/lib/arc/network";
 import { arcPublicClient } from "@/lib/contracts/arc-contract-clients";
+import { companyInitials } from "@/lib/company/company-initials";
 
 const navigation = [
   { label: "Dashboard", icon: OverviewIcon },
@@ -90,7 +91,7 @@ function Sidebar({ page, companyName, onNavigate }: { page: Page; companyName: s
 
       <div className="mt-auto p-3">
         <button className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border hover:bg-white/55">
-          <span className="grid size-8 place-items-center rounded-full bg-ink text-[10px] font-medium text-white">NL</span>
+          <span className="grid size-8 place-items-center rounded-full bg-ink text-[10px] font-medium text-white">{companyInitials(companyName)}</span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-medium text-ink">{companyName}</span>
             <span className="mt-0.5 block text-[10px] text-muted">Company workspace</span>
