@@ -67,6 +67,20 @@ function Brand() {
 }
 
 function Sidebar({ page, companyName, onNavigate }: { page: Page; companyName: string; onNavigate: (page: Page) => void }) {
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!workspaceMenuOpen) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!workspaceMenuRef.current?.contains(event.target as Node)) setWorkspaceMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [workspaceMenuOpen]);
+
   return (
     <aside className="fixed inset-y-0 left-0 z-20 flex w-[224px] flex-col border-r border-border bg-sidebar">
       <Brand />
@@ -90,15 +104,37 @@ function Sidebar({ page, companyName, onNavigate }: { page: Page; companyName: s
         })}
       </nav>
 
-      <div className="mt-auto p-3">
-        <button className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border hover:bg-white/55">
+      <div ref={workspaceMenuRef} className="relative mt-auto p-3">
+        {workspaceMenuOpen && (
+          <div className="absolute inset-x-3 bottom-full mb-1 rounded-xl border border-border bg-white p-1.5 shadow-[0_12px_32px_rgba(23,24,21,0.10)]">
+            <button
+              type="button"
+              onClick={() => {
+                setWorkspaceMenuOpen(false);
+                onNavigate("Settings");
+              }}
+              className="w-full rounded-lg px-3 py-2 text-left text-xs text-muted outline-none transition-colors hover:bg-canvas hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/20"
+            >
+              Settings
+            </button>
+          </div>
+        )}
+        <div className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border hover:bg-white/55">
           <span className="grid size-8 place-items-center rounded-full bg-ink text-[10px] font-medium text-white">{companyInitials(companyName)}</span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-medium text-ink">{companyName}</span>
             <span className="mt-0.5 block text-[10px] text-muted">Company workspace</span>
           </span>
-          <ChevronDownIcon className="size-3.5 text-faint" />
-        </button>
+          <button
+            type="button"
+            aria-label="Open company workspace menu"
+            aria-expanded={workspaceMenuOpen}
+            onClick={() => setWorkspaceMenuOpen((open) => !open)}
+            className="grid size-7 place-items-center rounded-md text-faint outline-none transition-colors hover:bg-white hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/20"
+          >
+            <ChevronDownIcon className={`size-3.5 transition-transform duration-200 ${workspaceMenuOpen ? "rotate-180" : ""}`} />
+          </button>
+        </div>
       </div>
     </aside>
   );
