@@ -14,7 +14,7 @@ export type SpendingPolicy = {
   description: string;
   department: string;
   category: string;
-  limitType: "monthly" | "per_transaction";
+  limitType: "monthly" | "weekly" | "annual" | "per_transaction";
   limitAmount: number;
   businessLimit: number;
   businessCurrency: "GBP";

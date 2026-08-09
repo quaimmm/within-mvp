@@ -7,7 +7,7 @@ export const GeneratedPolicyContentSchema = z.object({
   description: trimmedText.max(400),
   department: trimmedText.max(100),
   category: trimmedText.max(100),
-  limitType: z.enum(["monthly", "per_transaction"]),
+  limitType: z.enum(["monthly", "weekly", "annual", "per_transaction"]),
   limitAmount: z.number().positive().max(1_000_000),
   currency: z.literal("GBP"),
   approvalRequired: z.boolean(),
