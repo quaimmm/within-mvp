@@ -644,14 +644,11 @@ function RulesPage({ demoState, setDemoState }: { demoState: DemoState; setDemoS
 }
 
 function AuthenticatedFooter({ wallet }: { wallet: AppWallet }) {
-  const contactEmail = process.env.NEXT_PUBLIC_WITHIN_CONTACT_EMAIL || "hello@within.finance";
   return <footer className="mx-10 grid grid-cols-3 items-center border-t border-border py-5 text-[9px] text-faint">
     <span>© 2026 Within</span>
     <a href={ARC_TESTNET.explorerUrl} target="_blank" rel="noopener noreferrer" aria-label="Built on Arc Testnet (opens in a new tab)" className="flex items-center justify-center gap-1.5 transition-colors hover:text-ink">Built on Arc Testnet<ExternalLinkIcon className="size-2.5"/></a>
     <nav aria-label="Application footer" className="flex items-center justify-end gap-3">
       <span>Status · Arc Testnet · {wallet.address && isArcTestnet(wallet.chainId) ? "Connected" : "Disconnected"}</span>
-      <a href="/about" className="transition-colors hover:text-ink">About</a>
-      <a href={`mailto:${contactEmail}`} className="transition-colors hover:text-ink">Contact</a>
     </nav>
   </footer>;
 }
