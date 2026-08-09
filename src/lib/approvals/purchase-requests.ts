@@ -13,7 +13,9 @@ export const purchaseSamples: Record<string, Partial<PurchaseRequestForm>> = {
 export function validatePurchaseRequest(form: PurchaseRequestForm): void {
   if (!form.merchant.trim()) throw new Error("Merchant is required.");
   if (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) throw new Error("Enter a positive purchase amount.");
-  if (!/^[^@\s]+@northstar\.io$/i.test(form.requesterEmail)) throw new Error("Use a Northstar work email.");
+  const requesterEmail = form.requesterEmail.trim();
+  if (!requesterEmail) throw new Error("Requester email is required.");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(requesterEmail)) throw new Error("Enter a valid requester email.");
   if (!form.businessReason.trim()) throw new Error("Business reason is required.");
   if (form.settlementAmount && (!Number.isFinite(Number(form.settlementAmount)) || Number(form.settlementAmount) <= 0)) throw new Error("Settlement amount must be positive.");
 }
