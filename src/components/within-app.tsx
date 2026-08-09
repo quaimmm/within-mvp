@@ -40,6 +40,7 @@ import { ARC_POLICY_ACTIVATION_STORAGE_KEY, ARC_POLICY_CONTRACT, confirmPolicySt
 import { ARC_TESTNET, isArcTestnet, shortenAddress, type BrowserEthereumProvider } from "@/lib/arc/network";
 import { arcPublicClient } from "@/lib/contracts/arc-contract-clients";
 import { companyInitials } from "@/lib/company/company-initials";
+import { userDisplayName, userInitials } from "@/lib/profile/user-initials";
 
 const navigation = [
   { label: "Dashboard", icon: OverviewIcon },
@@ -111,6 +112,7 @@ function TopNavigation({
   page,
   wallet,
   walletBusy,
+  user,
   onConnectWallet,
   onSwitchNetwork,
   onSwitchAccount,
@@ -122,6 +124,7 @@ function TopNavigation({
   page: Page;
   wallet: AppWallet;
   walletBusy: boolean;
+  user: DemoState["signedInUser"];
   onConnectWallet: () => void;
   onSwitchNetwork: () => void;
   onSwitchAccount: () => void;
@@ -196,7 +199,7 @@ function TopNavigation({
             </div>
           </div>}
         </div>
-        <div className="relative"><button aria-label="Open profile" aria-expanded={menuOpen} onClick={() => { setMenuOpen((open) => !open); setConfirmingReset(false); }} className="grid size-8 place-items-center rounded-full bg-[#e7e4dc] text-[10px] font-medium text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30">AM</button>{demoModeEnabled && menuOpen && <div className="absolute right-0 top-11 w-64 rounded-xl border border-border bg-white p-3 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">{confirmingReset ? <div><p className="text-[11px] leading-5 text-ink">Reset the workspace to its starting state?</p><div className="mt-3 flex justify-end gap-2"><Button onClick={() => setConfirmingReset(false)} className="h-8 px-3 text-[10px]">Cancel</Button><Button variant="primary" onClick={() => { onReset(); setMenuOpen(false); setConfirmingReset(false); }} className="h-8 px-3 text-[10px]">Reset</Button></div></div> : <div><div className="border-b border-border px-2 pb-3"><p className="text-[11px] text-ink">Amanda Morgan</p><p className="mt-1 text-[9px] text-muted">amanda@northstar.io</p><p className="mt-1 text-[9px] text-muted">Administrator</p></div><button onClick={() => { onNavigate("Settings"); setMenuOpen(false); }} className="mt-2 w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Company settings</button><button type="button" onClick={() => setConfirmingReset(true)} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Reset workspace</button><button onClick={onSignOut} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Sign out</button></div>}</div>}</div>
+        <div className="relative"><button aria-label="Open profile" aria-expanded={menuOpen} onClick={() => { setMenuOpen((open) => !open); setConfirmingReset(false); }} className="grid size-8 place-items-center rounded-full bg-[#e7e4dc] text-[10px] font-medium text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30">{userInitials(user.firstName, user.lastName)}</button>{demoModeEnabled && menuOpen && <div className="absolute right-0 top-11 w-64 rounded-xl border border-border bg-white p-3 shadow-[0_18px_55px_rgba(23,24,21,0.12)]">{confirmingReset ? <div><p className="text-[11px] leading-5 text-ink">Reset the workspace to its starting state?</p><div className="mt-3 flex justify-end gap-2"><Button onClick={() => setConfirmingReset(false)} className="h-8 px-3 text-[10px]">Cancel</Button><Button variant="primary" onClick={() => { onReset(); setMenuOpen(false); setConfirmingReset(false); }} className="h-8 px-3 text-[10px]">Reset</Button></div></div> : <div><div className="border-b border-border px-2 pb-3"><p className="text-[11px] text-ink">{userDisplayName(user.firstName, user.lastName)}</p><p className="mt-1 text-[9px] text-muted">{user.email}</p><p className="mt-1 text-[9px] text-muted">{user.role}</p></div><button onClick={() => { onNavigate("Settings"); setMenuOpen(false); }} className="mt-2 w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Company settings</button><button type="button" onClick={() => setConfirmingReset(true)} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Reset workspace</button><button onClick={onSignOut} className="w-full rounded-lg px-2 py-2 text-left text-[11px] text-muted hover:bg-canvas hover:text-ink">Sign out</button></div>}</div>}</div>
       </div>
     </header>
   );
@@ -711,7 +714,7 @@ export default function WithinApp() {
     <div className={`min-h-screen min-w-[1024px] bg-canvas text-ink ${introMode !== "ready" ? `app-entry app-entry-${introMode}` : ""}`}>
       <Sidebar page={page} companyName={demoState.company.companyName} onNavigate={setPage} />
       {page !== "Credit" && <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>}
-      <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
+      <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} user={demoState.signedInUser} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
       <main className="ml-[224px] flex min-h-screen flex-col pt-[72px]">
         <div className="flex-1 px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} wallet={appWallet} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={`${demoState.idempotency.publish}-${walletSessionVersion}`} demoState={demoState} setDemoState={setDemoState} /> : page === "Treasury" ? <TreasuryPage state={demoState} wallet={appWallet} /> : page === "Credit" ? <EmployeeCreditPage key={walletSessionVersion} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />}</div>
         <AuthenticatedFooter wallet={appWallet}/>

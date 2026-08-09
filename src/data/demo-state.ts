@@ -33,7 +33,7 @@ export type WalletSession = { address: string | null; chainId: string | null };
 export type DemoState = {
   version: typeof DEMO_STATE_VERSION;
   signedIn: boolean;
-  signedInUser: { name: string; email: string; role: string };
+  signedInUser: { firstName: string; lastName: string; email: string; role: string };
   page: DemoPage;
   dashboard: {
     companySpend: number; budgetRemaining: number; pendingCount: number; activeRuleCount: number; activity: DashboardTransaction[];
@@ -133,7 +133,7 @@ export function createCleanDemoState(): DemoState {
   return {
     version: DEMO_STATE_VERSION,
     signedIn: false,
-    signedInUser: { name: "Amanda Morgan", email: "amanda@northstar.io", role: "Administrator" },
+    signedInUser: { firstName: "Amanda", lastName: "Morgan", email: "amanda@northstar.io", role: "Administrator" },
     page: "Dashboard",
     dashboard: { companySpend: 42_310, budgetRemaining: 57_690, pendingCount: 3, activeRuleCount: 12, activity: clone(seedTransactions), drawerOpen: false, selectedApprovalId: null, paymentStatus: "idle", paymentResult: null },
     approvals: clone(seedApprovals),
@@ -160,7 +160,7 @@ export function restoreDemoState(raw: string | null): DemoState {
     const value = JSON.parse(raw) as DemoState;
     if (value.version !== DEMO_STATE_VERSION || typeof value.signedIn !== "boolean" || !value.dashboard || !value.rules || !value.company || !value.wallet || !value.treasury || !value.credit || !value.idempotency || !Array.isArray(value.approvals) || !Array.isArray(value.members) || !Array.isArray(value.cards) || !Array.isArray(value.integrations) || !Array.isArray(value.treasury.signers) || !Array.isArray(value.treasury.requests) || !Array.isArray(value.credit.requests) || !Array.isArray(value.credit.loans) || !Array.isArray(value.credit.repayments) || !value.analytics || !Array.isArray(value.dashboard.activity) || !Array.isArray(value.rules.seededRules)) return createCleanDemoState();
     const clean = createCleanDemoState();
-    return { ...clean, ...value, dashboard: { ...clean.dashboard, ...value.dashboard, activity: migrateActivityRecords(value.dashboard.activity), drawerOpen: false, selectedApprovalId: null, paymentStatus: value.dashboard.paymentStatus === "completed" && value.dashboard.paymentResult ? "completed" : "idle", paymentResult: value.dashboard.paymentStatus === "completed" ? value.dashboard.paymentResult : null }, rules: { ...clean.rules, ...value.rules, generationState: value.rules.generationState === "ready" || value.rules.generationState === "error" ? value.rules.generationState : "idle" }, wallet: { ...clean.wallet, ...value.wallet }, credit: { ...clean.credit, ...value.credit, selectedRequestId: null } };
+    return { ...clean, ...value, signedInUser: { ...clean.signedInUser, ...value.signedInUser }, dashboard: { ...clean.dashboard, ...value.dashboard, activity: migrateActivityRecords(value.dashboard.activity), drawerOpen: false, selectedApprovalId: null, paymentStatus: value.dashboard.paymentStatus === "completed" && value.dashboard.paymentResult ? "completed" : "idle", paymentResult: value.dashboard.paymentStatus === "completed" ? value.dashboard.paymentResult : null }, rules: { ...clean.rules, ...value.rules, generationState: value.rules.generationState === "ready" || value.rules.generationState === "error" ? value.rules.generationState : "idle" }, wallet: { ...clean.wallet, ...value.wallet }, credit: { ...clean.credit, ...value.credit, selectedRequestId: null } };
   } catch { return createCleanDemoState(); }
 }
 
