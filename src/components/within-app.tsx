@@ -32,6 +32,8 @@ import { SettingsPage } from "@/components/settings-page";
 import { AppEntryReveal, WITHIN_APP_INTRO_SEEN_KEY, WITHIN_ENTRY_SOURCE_KEY } from "@/components/app-entry-reveal";
 import { EmployeeCreditPage } from "@/components/employee-credit-page";
 import { TreasuryPage } from "@/components/treasury-page";
+import { creditAvailable, creditOutstanding } from "@/lib/credit/demo-credit";
+import { formatCompanyUsdc, readCompanyLiquidity } from "@/lib/treasury/company-liquidity";
 import { RulesArcPolicyStatus } from "@/components/rules-arc-policy-status";
 import { AskWithinPanel } from "@/components/ask-within-panel";
 import { useWallet } from "@/components/wallet-provider";
@@ -396,8 +398,8 @@ function MultisigApprovalDrawer({ approval, state, setState, onClose }: { approv
   return <><button aria-label="Close approval drawer" onClick={onClose} className="fixed inset-y-0 left-[224px] right-0 top-[72px] z-30 bg-ink/10"/><aside aria-label="Treasury multisig approval" className="fixed bottom-0 right-0 top-[72px] z-40 flex w-[520px] flex-col border-l border-border bg-white shadow-[-24px_0_70px_rgba(23,24,21,.1)]"><div className="flex items-center justify-between border-b border-border px-8 py-5"><p className="text-[11px]">Treasury multisig</p><button aria-label="Close drawer" onClick={onClose} disabled={working} className="text-muted">×</button></div><div className="flex-1 overflow-y-auto px-8 py-8"><div className="flex justify-between"><div><p className="text-[11px] text-muted">{approval.employeeName} · {approval.department}</p><h2 className="mt-2 text-[27px] tracking-[-.04em]">{approval.merchant}</h2></div><p className="text-[30px] tracking-[-.04em]">£{approval.amount.toLocaleString("en-GB")}</p></div><section className="mt-9 border-t border-border pt-6"><p className="text-[10px] text-muted">Matched rule</p><p className="mt-3 text-[12px]">{approval.ruleName}</p><p className="mt-2 text-[10px] text-muted">{approval.policyId}</p><button onClick={()=>setState((current)=>({...current,page:"Rules",dashboard:{...current.dashboard,drawerOpen:false,selectedApprovalId:null}}))} className="mt-3 text-[10px] text-accent">View policy</button></section><section className="mt-7 border-t border-border pt-6"><p className="text-[10px] text-muted">Why multisig?</p><p className="mt-3 text-[12px] leading-5">{approval.reviewReason}</p></section><section className="mt-7 border-t border-border pt-6"><div className="flex justify-between"><p className="text-[10px] text-muted">Signer progress</p><p className="text-[10px] text-accent">{approvals} of {request.required} approvals</p></div><div className="mt-5 divide-y divide-border border-y border-border">{state.treasury.signers.map((item)=>{const decision=request.decisions.find((entry)=>entry.signerId===item.id);return <div key={item.id} className="flex justify-between py-3 text-[10px]"><span>{item.name}<span className="ml-2 text-faint">{item.role}</span></span><span className={decision?"text-success":"text-muted"}>{decision?.decision??"Awaiting"}</span></div>})}</div></section><section className="mt-7 border-t border-border pt-6"><NetworkStatus address={state.wallet.address} chainId={state.wallet.chainId} mock/><p className="mt-3 text-[10px] text-muted">Status: {request.status}</p><p className="mt-2 text-[9px] text-faint">Expires {new Date(request.expiresAt).toLocaleDateString("en-GB")}</p></section>{message&&<p role="status" className="mt-5 text-[10px] text-muted">{message}</p>}<details className="mt-7 border-t border-border pt-5 text-[10px] text-muted"><summary>View settlement details</summary><p className="mt-3">This approval is completed locally and does not create an Arc transaction or explorer link.</p></details></div><div className="border-t border-border p-6"><p className="mb-4 text-[9px] text-muted">Acting as {signer.name} · Local approval identity</p><div className="grid grid-cols-2 gap-3">{request.status==="Ready to settle"?<Button variant="primary" disabled={working} onClick={settle} className="col-span-2 h-11">{working?"Settling…":"Complete local settlement"}</Button>:request.status==="Settlement confirmed"?<Button onClick={onClose} className="col-span-2 h-11">Close</Button>:<><Button disabled={working||request.status!=="Awaiting signatures"} onClick={decline}>Decline</Button><Button variant="primary" disabled={working||request.status!=="Awaiting signatures"} onClick={approve}>{working?"Approving…":"Approve as current signer"}</Button></>}</div></div></aside></>;
 }
 
-function Dashboard({ demoState, wallet, onOpenApproval }: { demoState: DemoState; wallet: AppWallet; onOpenApproval: (id: string) => void }) {
-  const approvalTriggerRef = useRef<HTMLButtonElement>(null);
+function Dashboard({ demoState, wallet, onOpenApproval, onNavigate }: { demoState: DemoState; wallet: AppWallet; onOpenApproval: (id: string) => void; onNavigate: (page: Page) => void }) {
+  const [treasuryBalance, setTreasuryBalance] = useState<string | null>(demoState.treasury.balance);
   const activeArcPolicy = demoState.rules.generatedRule?.active && demoState.rules.generatedRule.settlementGuard?.enforcement === "onchain";
   const latestConfirmedTransaction = demoState.dashboard.paymentResult?.provider === "arc"
     ? demoState.dashboard.paymentResult.transactionHash
@@ -407,6 +409,40 @@ function Dashboard({ demoState, wallet, onOpenApproval }: { demoState: DemoState
     wallet.address && isArcTestnet(wallet.chainId) ? "Wallet connected" : null,
     latestConfirmedTransaction ? `Latest confirmed transaction · ${shortenTransactionHash(latestConfirmedTransaction)}` : null,
   ].filter((item): item is string => Boolean(item));
+  const pendingApprovals = demoState.approvals.filter((item) => item.status === "Pending" || item.status === "Flagged");
+  const pendingValue = pendingApprovals.reduce((total, item) => total + item.amount, 0);
+  const availableCredit = creditAvailable(demoState.credit);
+  const utilisedCredit = creditOutstanding(demoState.credit);
+  const departments = [...demoState.analytics.departments].sort((a, b) => b.value - a.value).slice(0, 4);
+  const largestDepartmentSpend = Math.max(...departments.map((item) => item.value), 1);
+  const highRiskApproval = pendingApprovals.find((item) => item.risk === "High") ?? null;
+  const departmentAllowance = demoState.members.reduce<Record<string, { spend: number; limit: number }>>((result, member) => {
+    const current = result[member.department] ?? { spend: 0, limit: 0 };
+    result[member.department] = { spend: current.spend + member.monthlySpend, limit: current.limit + member.monthlyLimit };
+    return result;
+  }, {});
+  const closestDepartment = Object.entries(departmentAllowance)
+    .filter(([, value]) => value.limit > 0)
+    .sort(([, left], [, right]) => right.spend / right.limit - left.spend / left.limit)[0];
+  const money = (value: number) => `£${value.toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
+
+  useEffect(() => {
+    let active = true;
+    readCompanyLiquidity()
+      .then((snapshot) => { if (active) setTreasuryBalance(`${formatCompanyUsdc(snapshot.availableToSpend)} USDC`); })
+      .catch(() => { if (active && !demoState.treasury.balance) setTreasuryBalance(null); });
+    return () => { active = false; };
+  }, [demoState.treasury.balance]);
+
+  const kpis = [
+    { label: "Company spend", value: money(demoState.dashboard.companySpend), detail: "This month" },
+    { label: "Pending approvals", value: pendingApprovals.length.toString(), detail: `${money(pendingValue)} awaiting review` },
+    { label: "Treasury", value: treasuryBalance ?? "Unavailable", detail: "Available on Arc" },
+    { label: "Available credit", value: `${availableCredit.toLocaleString("en-GB")} USDC`, detail: `${utilisedCredit.toLocaleString("en-GB")} USDC utilised` },
+  ];
+
+  const statusLabel = (status: DashboardTransaction["status"]) =>
+    status === "Pending" ? "Awaiting approval" : status === "Flagged" ? "Needs review" : status;
 
   return (
     <div className="mx-auto max-w-[1120px]">
@@ -415,27 +451,42 @@ function Dashboard({ demoState, wallet, onOpenApproval }: { demoState: DemoState
         <p className="text-[10px] text-faint">AI proposes. Humans approve. Arc executes.</p>
       </div>
       {liveStatuses.length > 0 && <div className="mt-5 flex flex-wrap gap-x-7 gap-y-2 text-[9px] text-muted">{liveStatuses.map((status) => <span key={status} className="flex items-center gap-2"><i className="size-1 rounded-full bg-success"/>{status}</span>)}</div>}
-      <section className="pt-16">
-        <p className="text-[10px] text-accent">Arc Testnet Beta</p>
-        <h2 className="mt-4 max-w-2xl text-[42px] font-normal leading-tight tracking-[-0.05em] text-ink">Programmable company spending.</h2>
-        <p className="mt-5 max-w-xl text-[12px] leading-6 text-muted">Set spending rules, approve decisions and access employee credit through one clear workspace built on Arc.</p>
+      <section className="pt-10">
+        <h2 className="text-[32px] font-normal tracking-[-0.045em] text-ink">Dashboard</h2>
+        <p className="mt-2 text-[12px] text-muted">{demoState.company.companyName} overview</p>
+        <p className="mt-1 text-[10px] text-faint">Company spending, approvals and liquidity at a glance.</p>
+      </section>
+
+      <section aria-label="Company finance summary" className="mt-10 grid grid-cols-1 border-y border-border sm:grid-cols-2 xl:grid-cols-4 xl:divide-x xl:divide-border">
+        {kpis.map((item, index) => <div key={item.label} className={`py-7 ${index % 2 === 0 ? "sm:pr-7" : "sm:pl-7"} ${index > 1 ? "border-t border-border xl:border-t-0" : ""} ${index > 0 ? "xl:px-7" : "xl:pl-0"}`}><p className="text-[9px] text-muted">{item.label}</p><p className="mt-3 text-[22px] tracking-[-0.035em] text-ink">{item.value}</p><p className="mt-2 text-[9px] text-faint">{item.detail}</p></div>)}
+      </section>
+
+      <div className="mt-14 grid gap-14 lg:grid-cols-[1.05fr_.95fr]">
+        <section aria-labelledby="attention-title">
+          <h3 id="attention-title" className="text-[18px] font-normal tracking-[-0.03em] text-ink">Needs your attention</h3>
+          <div className="mt-5 divide-y divide-border border-y border-border">
+            <div className="flex items-center gap-5 py-4"><div className="min-w-0 flex-1"><p className="text-[11px] text-ink">{pendingApprovals.length} approvals awaiting review</p><p className="mt-1 text-[9px] text-muted">{money(pendingValue)} needs a finance decision</p></div><button type="button" onClick={() => pendingApprovals[0] ? onOpenApproval(pendingApprovals[0].id) : onNavigate("Approvals")} className="text-[9px] text-accent hover:opacity-70">Review</button></div>
+            {highRiskApproval && <div className="flex items-center gap-5 py-4"><div className="min-w-0 flex-1"><p className="truncate text-[11px] text-ink">{highRiskApproval.merchant} requires attention</p><p className="mt-1 text-[9px] text-muted">{highRiskApproval.ruleName} · {money(highRiskApproval.amount)}</p></div><button type="button" onClick={() => onOpenApproval(highRiskApproval.id)} className="text-[9px] text-accent hover:opacity-70">View</button></div>}
+            {closestDepartment && <div className="flex items-center gap-5 py-4"><div className="min-w-0 flex-1"><p className="text-[11px] text-ink">{closestDepartment[0]} is approaching its monthly limit</p><p className="mt-1 text-[9px] text-muted">{Math.round(closestDepartment[1].spend / closestDepartment[1].limit * 100)}% of team allowance used</p></div><button type="button" onClick={() => onNavigate("Analytics")} className="text-[9px] text-accent hover:opacity-70">View</button></div>}
+          </div>
+        </section>
+
+        <section aria-labelledby="spend-title">
+          <div className="flex items-baseline justify-between"><h3 id="spend-title" className="text-[18px] font-normal tracking-[-0.03em] text-ink">Spend this month</h3><button type="button" onClick={() => onNavigate("Analytics")} className="text-[9px] text-accent hover:opacity-70">View analytics</button></div>
+          <div className="mt-6 space-y-5">{departments.map((item) => <div key={item.label}><div className="flex justify-between text-[10px]"><span className="text-muted">{item.label}</span><span className="text-ink">{money(item.value)}</span></div><div className="mt-2 h-px bg-border"><div className="h-px bg-accent" style={{ width: `${Math.max(5, item.value / largestDepartmentSpend * 100)}%` }}/></div></div>)}</div>
+        </section>
+      </div>
+
+      <section aria-labelledby="activity-title" className="mt-16">
+        <h3 id="activity-title" className="text-[18px] font-normal tracking-[-0.03em] text-ink">Recent activity</h3>
+        <div className="mt-5 divide-y divide-border border-y border-border">
+          {demoState.dashboard.activity.slice(0, 5).map((transaction) => <div key={transaction.id} className="grid grid-cols-[1fr_auto] items-center gap-6 py-4 sm:grid-cols-[1.15fr_.8fr_auto_auto]"><div className="min-w-0"><p className="truncate text-[11px] text-ink">{transaction.merchant}</p><p className="mt-1 text-[9px] text-muted sm:hidden">{transaction.role} · {transaction.category}</p></div><p className="hidden truncate text-[9px] text-muted sm:block">{transaction.role} · {transaction.category}</p><p className="text-[10px] text-ink">{transaction.amount}</p><p className={`hidden text-right text-[9px] sm:block ${transaction.status === "Flagged" ? "text-[#9a5b42]" : transaction.status === "Approved" ? "text-success" : "text-muted"}`}>{statusLabel(transaction.status)}</p></div>)}
+        </div>
+        {demoState.dashboard.paymentResult?.provider === "arc" && demoState.dashboard.paymentResult.explorerUrl && <a href={demoState.dashboard.paymentResult.explorerUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-[9px] text-accent hover:opacity-70">View latest Arc settlement ↗</a>}
       </section>
 
       <AskWithinPanel state={demoState}/>
 
-      <div className="mt-20 border-t border-border pt-8">
-        <section>
-          <div><h3 className="text-[18px] font-normal tracking-[-0.03em] text-ink">Approval workspace</h3><p className="mt-2 text-[11px] text-muted">Local workflow</p></div>
-          <div className="mt-6 divide-y divide-border">
-            {demoState.approvals.filter((item) => item.status === "Pending" || item.status === "Flagged").map((item, index) => (
-              <button ref={index === 0 ? approvalTriggerRef : undefined} data-testid={item.id === "APR-EMILY-OPENAI" ? "emily-approval" : undefined} onClick={() => onOpenApproval(item.id)} key={item.id} className="group flex w-full items-center gap-3 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/20">
-                <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium text-ink">{item.employeeName}</p><p className="mt-1 truncate text-[9px] text-muted">{item.merchant} · {item.category}</p></div>
-                <span className="text-[11px] font-medium text-ink">£{item.amount}</span><span className="text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-accent">›</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      </div>
       <div className="h-16" />
     </div>
   );
@@ -750,7 +801,7 @@ export default function WithinApp() {
       {page !== "Credit" && <div className="fixed bottom-[92px] left-6 z-30"><NetworkStatus address={demoState.wallet.address} chainId={demoState.wallet.chainId} mock={!demoState.wallet.address} onClick={() => setDemoState((state) => ({ ...state, page: "Settings", settingsSection: "Treasury" }))}/></div>}
       <TopNavigation page={page} wallet={appWallet} walletBusy={walletBusy} user={demoState.signedInUser} onConnectWallet={() => void connectAppWallet()} onSwitchNetwork={() => void switchAppNetwork()} onSwitchAccount={() => void switchAppAccount()} onDisconnectWallet={() => void disconnectAppWallet()} onReset={resetDemo} onNavigate={setPage} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />
       <main className="ml-[224px] flex min-h-screen flex-col pt-[72px]">
-        <div className="flex-1 px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} wallet={appWallet} onOpenApproval={openApproval} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={`${demoState.idempotency.publish}-${walletSessionVersion}`} demoState={demoState} setDemoState={setDemoState} /> : page === "Treasury" ? <TreasuryPage state={demoState} wallet={appWallet} /> : page === "Credit" ? <EmployeeCreditPage key={walletSessionVersion} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />}</div>
+        <div className="flex-1 px-10 py-14">{page === "Dashboard" ? <Dashboard demoState={demoState} wallet={appWallet} onOpenApproval={openApproval} onNavigate={setPage} /> : page === "Cards" ? <CardsPage state={demoState} setState={setDemoState} /> : page === "Approvals" ? <ApprovalsPage state={demoState} setState={setDemoState} onOpen={openApproval} /> : page === "Rules" ? <RulesPage key={`${demoState.idempotency.publish}-${walletSessionVersion}`} demoState={demoState} setDemoState={setDemoState} /> : page === "Treasury" ? <TreasuryPage state={demoState} wallet={appWallet} /> : page === "Credit" ? <EmployeeCreditPage key={walletSessionVersion} /> : page === "Team" ? <TeamPage state={demoState} setState={setDemoState} /> : page === "Analytics" ? <AnalyticsPage state={demoState} /> : <SettingsPage state={demoState} setState={setDemoState} onReset={resetDemo} onSignOut={() => { setDemoState((state) => ({ ...state, signedIn: false })); router.push("/connect"); }} />}</div>
         <AuthenticatedFooter wallet={appWallet}/>
       </main>
       {selectedApproval && demoState.dashboard.drawerOpen && (selectedApproval.approvalType === "Treasury multisig" ? <MultisigApprovalDrawer approval={selectedApproval} state={demoState} setState={setDemoState} onClose={closeApproval}/> : <ApprovalDrawer approval={selectedApproval} decision={decision} completedPayment={demoState.dashboard.paymentResult} paymentIdempotencyKey={`${selectedApproval.id}-${demoState.idempotency.payment}`} onPaymentComplete={completePayment} onDecline={declineApproval} onClose={() => { if (decision === "idle") closeApproval(); }} />)}
