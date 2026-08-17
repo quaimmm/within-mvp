@@ -436,7 +436,7 @@ function Dashboard({ demoState, wallet, onOpenApproval, onNavigate }: { demoStat
   useEffect(() => {
     let active = true;
     readCompanyLiquidity()
-      .then((snapshot) => { if (active) setTreasuryBalance(`${formatCompanyUsdc(snapshot.availableToSpend)} USDC`); })
+      .then((snapshot) => { if (active) setTreasuryBalance(`${formatCompanyUsdc(snapshot.availableToSpend, 1)} USDC`); })
       .catch(() => { if (active && !demoState.treasury.balance) setTreasuryBalance(null); });
     return () => { active = false; };
   }, [demoState.treasury.balance]);

@@ -80,3 +80,8 @@ test("Treasury balance presentation uses one decimal and locale grouping", () =>
   assert.equal(formatCompanyUsdc(BigInt(184_000_000), 1), "184.0");
   assert.equal(formatCompanyUsdc(BigInt(146_280), 1), "0.1");
 });
+
+test("Dashboard Treasury KPI uses the same one-decimal balance presentation", async () => {
+  const shell = await readSource("src/components/within-app.tsx");
+  assert.match(shell, /formatCompanyUsdc\(snapshot\.availableToSpend, 1\)/);
+});
