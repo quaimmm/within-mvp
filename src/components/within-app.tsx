@@ -253,26 +253,28 @@ function shortenTransactionHash(hash?: string) {
 
 function PaymentExecutionView({ approval, status, activeStage, result, errorMessage }: { approval: DemoApproval; status: "processing" | "completed" | "failed"; activeStage: number; result: PaymentResult | null; errorMessage: string | null }) {
   if (status === "completed" && result) {
+    const finalOnArc = result.provider === "arc" && result.network === "arc-testnet" && Boolean(result.transactionHash);
     return (
       <div className="animate-decision-in">
         <div className="pt-12 text-center">
           <span className="mx-auto grid size-11 place-items-center rounded-full bg-success-soft text-success"><CheckIcon className="size-5" /></span>
-          <h2 className="mt-6 text-[28px] font-normal tracking-[-0.04em] text-ink">Payment completed</h2>
-          <p className="mt-3 text-[14px] text-muted">£{approval.amount.toFixed(2)} paid to {approval.merchant}</p>
+          <h2 className="mt-6 text-[28px] font-normal tracking-[-0.04em] text-ink">{finalOnArc ? "Settlement complete" : "Payment completed"}</h2>
+          <p className="mt-3 text-[14px] text-muted">{finalOnArc ? `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}` : `£${approval.amount.toFixed(2)} paid to ${approval.merchant}`}</p>
+          {finalOnArc && <p className="mt-3 text-[10px] font-medium text-success">✓ Final on Arc</p>}
+          {finalOnArc && result.explorerUrl && <a href={result.explorerUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-[10px] text-accent hover:underline">View on ArcScan ↗</a>}
         </div>
 
         <details className="group mt-12 border-y border-border">
           <summary className="flex cursor-pointer list-none items-center justify-between py-4 text-[11px] font-medium text-muted marker:hidden">Receipt details<span className="text-faint transition-transform duration-200 group-open:rotate-45">＋</span></summary>
           <div className="border-t border-border pb-5 pt-1">
             <dl className="divide-y divide-border">
-              {[["Settlement", `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}`], ["Payment ID", result.paymentId], ["Status", "Completed"]].map(([label, value]) => <div key={label} className="flex items-center justify-between py-3"><dt className="text-[10px] text-muted">{label}</dt><dd className="text-[11px] font-medium text-ink">{value}</dd></div>)}
+              {[["Settlement", `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}`], ...(finalOnArc ? [["Network", "Arc Testnet"]] : []), ["Status", finalOnArc ? "Final on Arc" : "Completed"], ["Payment ID", result.paymentId]].map(([label, value]) => <div key={label} className="flex items-center justify-between py-3"><dt className="text-[10px] text-muted">{label}</dt><dd className="text-[11px] font-medium text-ink">{value}</dd></div>)}
             </dl>
             <p className="mt-3 text-[9px] text-faint">Secured by programmable settlement</p>
             <details className="group/tech mt-4">
               <summary className="flex cursor-pointer list-none items-center justify-between py-2 text-[10px] text-muted marker:hidden">Technical details<span className="text-faint transition-transform duration-200 group-open/tech:rotate-45">＋</span></summary>
               <dl className="space-y-3 pt-3 text-[9px]">
                 {(result.provider === "arc" ? [["Provider", "ArcPaymentProvider"], ["Network", "Arc Testnet"], ["Test settlement", `${result.settledAmount.toFixed(2)} ${result.settlementCurrency}`], ["Enforcement", "Onchain spending rule"], ["Contract", shortenTransactionHash(result.contractAddress)], ["Policy", result.policyId || approval.policyId], ["Transaction", shortenTransactionHash(result.transactionHash)]] : [["Processing", "Local workflow"], ["Evidence", "No onchain transaction"], ["Policy ID", approval.policyId]]).map(([label, value]) => <div key={label} className="flex justify-between gap-5"><dt className="text-faint">{label}</dt><dd className="font-medium text-ink">{value}</dd></div>)}
-                {result.provider === "arc" && result.explorerUrl && <a href={result.explorerUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-[9px] text-accent hover:underline">View transaction</a>}
               </dl>
             </details>
           </div>
