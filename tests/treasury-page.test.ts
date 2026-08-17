@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { readCompanyLiquidity } from "../src/lib/treasury/company-liquidity.ts";
+import { formatCompanyUsdc, readCompanyLiquidity } from "../src/lib/treasury/company-liquidity.ts";
 
 const readSource = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -73,4 +73,10 @@ test("company liquidity uses the configured Arc treasury USDC balance without cr
   assert.deepEqual((calls[0] as { args: string[] }).args, ["0xCCE679E826618797208BB1Fba4418481d92fAaD0"]);
   assert.equal("wallet" in snapshot, false);
   assert.equal("credit" in snapshot, false);
+});
+
+test("Treasury balance presentation uses one decimal and locale grouping", () => {
+  assert.equal(formatCompanyUsdc(BigInt(12_450_183_742), 1), "12,450.2");
+  assert.equal(formatCompanyUsdc(BigInt(184_000_000), 1), "184.0");
+  assert.equal(formatCompanyUsdc(BigInt(146_280), 1), "0.1");
 });

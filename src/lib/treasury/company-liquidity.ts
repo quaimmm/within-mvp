@@ -60,8 +60,14 @@ export async function readCompanyLiquidity(
   };
 }
 
-export function formatCompanyUsdc(value: bigint) {
+export function formatCompanyUsdc(value: bigint, fractionDigits?: number) {
   const formatted = formatUnits(value, 6);
+  if (fractionDigits !== undefined) {
+    return new Intl.NumberFormat("en-GB", {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(Number(formatted));
+  }
   const [whole, fraction] = formatted.split(".");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return fraction ? `${grouped}.${fraction}` : grouped;
