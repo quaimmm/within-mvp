@@ -32,12 +32,16 @@ test("Treasury presentation respects existing Arc flags and isolates execution b
   for (const flag of ["ARC_APP_KIT_ENABLED", "ARC_SEND_ENABLED", "ARC_BRIDGE_ENABLED", "ARC_SWAP_ENABLED", "ARC_UNIFIED_BALANCE_ENABLED"]) {
     assert.match(operations, new RegExp(flag));
   }
-  assert.match(presentation, /Company liquidity/);
-  assert.match(presentation, /Total treasury/);
-  assert.match(presentation, /Available to spend/);
-  assert.match(presentation, /Pending \/ reserved/);
+  assert.match(presentation, /Manage company USDC liquidity and settlement/);
+  assert.match(presentation, /Available liquidity/);
+  assert.match(presentation, /Treasury capabilities/);
+  assert.match(presentation, /Unified Balance/);
   assert.match(presentation, /Across networks/);
   assert.match(presentation, /Move money/);
+  assert.match(presentation, /Technical details/);
+  assert.match(presentation, /shortenAddress\(liquidity\.treasuryAddress\)/);
+  assert.match(presentation, /navigator\.clipboard\.writeText\(liquidity\.treasuryAddress\)/);
+  assert.doesNotMatch(presentation, /Not recorded/);
   assert.doesNotMatch(presentation, /arc-liquidity-title/);
   assert.doesNotMatch(presentation, /Additional Circle liquidity visibility/);
   assert.doesNotMatch(presentation, /Refresh Unified Balance/);
@@ -49,7 +53,7 @@ test("Treasury presentation respects existing Arc flags and isolates execution b
   assert.doesNotMatch(operations, /writeContract|sendTransaction|eth_sendTransaction|bridgeToArc|spendUnifiedBalance|depositUnifiedBalance/);
   assert.match(operations, /Confirm Send/);
   assert.match(operations, /Confirm bridge/);
-  assert.match(operations, /Execution[\s\S]*Disabled for this release/);
+  assert.match(operations, /Execution[\s\S]*capabilityStates\.swap\.enabled \? "Preview" : "Unavailable"/);
   assert.doesNotMatch(source, /Credit facility|Employee Credit|repay|drawCredit/);
 });
 

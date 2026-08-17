@@ -309,6 +309,6 @@ test("Rendered Treasury UI requires Bridge review and keeps other capabilities r
   assert.match(source, /Confirm bridge/);
   assert.match(source, /Company Treasury/);
   assert.match(source, /defaultTreasuryBridgeDestination/);
-  assert.match(source, /Swap[\s\S]*Execution[\s\S]*Disabled for this release/);
+  assert.match(source, /Swap[\s\S]*Execution[\s\S]*capabilityStates\.swap\.enabled \? "Preview" : "Unavailable"/);
   assert.doesNotMatch(source, /depositUnifiedBalance|spendUnifiedBalance/);
 });

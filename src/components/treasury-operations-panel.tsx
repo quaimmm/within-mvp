@@ -43,8 +43,34 @@ const capabilityStates = getTreasuryCapabilityStates({
 function CapabilityBadge({ capability }: { capability: TreasuryCapabilityState }) {
   return (
     <span className={`text-[9px] uppercase tracking-[0.12em] ${capability.enabled ? "text-accent" : "text-faint"}`}>
-      {capability.mode}{capability.enabled ? "" : " · unavailable"}
+      {capabilityPresentation(capability)}
     </span>
+  );
+}
+
+function capabilityPresentation(capability: TreasuryCapabilityState) {
+  if (!capability.enabled) return "Unavailable";
+  return capability.mode === "Live" ? "Live" : "Preview";
+}
+
+export function TreasuryCapabilitySummary() {
+  const items = [
+    ["Send", capabilityStates.send],
+    ["Bridge", capabilityStates.bridge],
+    ["Swap", capabilityStates.swap],
+    ["Unified Balance", capabilityStates.unifiedBalance],
+  ] as const;
+
+  return (
+    <section className="mt-12" aria-labelledby="treasury-capabilities-title">
+      <p id="treasury-capabilities-title" className="text-[9px] uppercase tracking-[0.14em] text-faint">Treasury capabilities</p>
+      <div className="mt-5 grid grid-cols-2 gap-x-10 border-y border-border sm:grid-cols-4">
+        {items.map(([label, capability]) => {
+          const status = capabilityPresentation(capability);
+          return <div key={label} className="flex items-center justify-between gap-3 py-4 sm:block"><p className="text-[11px] text-ink">{label}</p><span className={`mt-0 text-[9px] uppercase tracking-[0.1em] sm:mt-2 sm:inline-block ${status === "Live" ? "text-success" : status === "Preview" ? "text-accent" : "text-faint"}`}>{status}</span></div>;
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -73,6 +99,7 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
   const [sendMessage, setSendMessage] = useState("");
   const [sendReview, setSendReview] = useState<SendReview | null>(null);
   const [sendResult, setSendResult] = useState<AppKitPaymentResult | null>(null);
+  const [sendHashCopied, setSendHashCopied] = useState(false);
   const sendLock = useRef(false);
 
   const [bridgeDirection, setBridgeDirection] = useState<TreasuryBridgeDirection>("ethereum-to-arc");
@@ -258,7 +285,7 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
       </div>
       <div className="mt-7 flex items-center justify-between border-y border-border py-5 text-[10px]">
         <div><p className="text-[11px]">Receive USDC on Arc</p><p className="mt-1 text-muted">Company Treasury</p></div>
-        <p className="font-mono text-[10px]">{ARC_PUBLIC_ADDRESSES.treasury || "Not configured"}</p>
+        <p className="text-muted">{ARC_PUBLIC_ADDRESSES.treasury ? "Ready to receive" : "Unavailable in this environment"}</p>
       </div>
     </section>
 
@@ -275,7 +302,7 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
           <div><h3 className="text-[18px] tracking-[-0.025em]">{operation}</h3><p className="mt-3 text-[10px] leading-5 text-muted">{operation === "Send" ? "Transfer USDC on Arc." : operation === "Bridge" ? "Move USDC between Ethereum Sepolia and Arc Testnet." : "Preview a supported stablecoin exchange on Arc."}</p></div>
           <CapabilityBadge capability={activeCapability} />
         </div>
-        {!activeCapability.enabled && <p className="mt-5 text-[10px] text-muted">This capability is not configured in the current environment.</p>}
+        {!activeCapability.enabled && <p className="mt-5 text-[10px] text-muted">Unavailable in this environment.</p>}
         {activeCapability.enabled && activeRequirement && <p className="mt-5 text-[10px] text-muted">{activeRequirement}</p>}
 
         {operation === "Send" && <div className="mt-8">
@@ -291,7 +318,7 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
             <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Status</dt><dd>{sendState === "reviewed" ? "Reviewed · not submitted" : sendState === "pending" ? "Awaiting wallet and Arc confirmation" : sendState === "success" ? "Confirmed" : sendState === "loading" ? "Preparing review…" : "Not submitted"}</dd></div>
           </dl>
           {sendMessage && <p role="status" className={`mt-5 text-[10px] ${sendState === "success" ? "text-success" : "text-muted"}`}>{sendMessage}</p>}
-          {sendResult && <div className="mt-5 flex items-center justify-between gap-6 text-[10px]"><span className="break-all text-muted">{sendResult.transactionHash}</span>{sendArcscanUrl && <a href={sendArcscanUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-accent hover:underline">View on ArcScan</a>}</div>}
+          {sendResult && <div className="mt-5 text-[10px]"><div className="flex items-center justify-between gap-6"><span className="text-success">Send confirmed</span>{sendArcscanUrl && <a href={sendArcscanUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-accent hover:underline">View on ArcScan ↗</a>}</div><details className="group mt-4 border-t border-border"><summary className="flex cursor-pointer list-none items-center justify-between py-3 text-muted marker:hidden">Technical details<span className="text-faint transition-transform group-open:rotate-180">⌄</span></summary><div className="flex min-w-0 items-center justify-between gap-5 pb-3"><span title={sendResult.transactionHash} className="min-w-0 truncate font-mono text-faint">{shortenAddress(sendResult.transactionHash)}</span><button type="button" onClick={() => void navigator.clipboard.writeText(sendResult.transactionHash).then(() => setSendHashCopied(true))} className="shrink-0 text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">{sendHashCopied ? "Copied" : "Copy"}</button></div></details></div>}
           <div className="mt-7 flex justify-end gap-3">
             {!sendReview && !sendResult && <Button variant="primary" onClick={() => void reviewSend()} disabled={!capabilityStates.send.enabled || Boolean(activeRequirement) || sendState === "loading"}>Review send</Button>}
             {sendReview && !sendResult && <><Button onClick={() => { setSendReview(null); setSendState("idle"); setSendMessage(""); }} disabled={sendState === "pending"}>Edit</Button><Button variant="primary" onClick={() => void confirmSend()} disabled={sendState === "pending"}>Confirm Send</Button></>}
@@ -331,7 +358,7 @@ export function TreasuryOperationsPanel({ wallet, onRefreshTreasury }: { wallet:
             <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Estimated receipt</dt><dd>{swapQuote ? `${swapQuote.estimatedOutput} ${swapQuote.outputAsset}` : swapState === "loading" ? "Requesting…" : "Review required"}</dd></div>
             <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Network fee</dt><dd>{swapQuote?.networkFee ?? "Review required"}</dd></div>
             <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Route</dt><dd>{swapQuote?.route ?? "Review required"}</dd></div>
-            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Execution</dt><dd>Disabled for this release</dd></div>
+            <div className="flex justify-between gap-6 py-4"><dt className="text-muted">Execution</dt><dd>{capabilityStates.swap.enabled ? "Preview" : "Unavailable"}</dd></div>
           </dl>
           {swapMessage && <p role="status" className="mt-5 text-[10px] text-muted">{swapMessage}</p>}
           {swapQuote && <p role="status" className="mt-5 text-[10px] text-success">Live quote ready. No wallet request was made.</p>}
