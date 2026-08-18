@@ -1,5 +1,7 @@
 import type { CompanyIntelligenceContext } from "./company-context.ts";
 
+export const ASK_WITHIN_HISTORY_KEY = "within:ask-history:v1";
+
 export type IntelligenceSection = { label: "Insight" | "Why" | "Attention" | "Opportunity"; text: string };
 export type IntelligenceAnswer = { intent: string; sections: IntelligenceSection[] };
 

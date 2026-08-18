@@ -794,8 +794,6 @@ export default function WithinApp() {
     const next = resetDemoState(sessionStorage);
     next.signedIn = true;
     sessionStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(next));
-    sessionStorage.removeItem(WITHIN_APP_INTRO_SEEN_KEY);
-    sessionStorage.removeItem(WITHIN_ENTRY_SOURCE_KEY);
     setDemoStateInternal(next);
     setResetToast(true);
     window.setTimeout(() => setResetToast(false), 2600);
@@ -821,7 +819,7 @@ export default function WithinApp() {
       </main>
       {selectedApproval && demoState.dashboard.drawerOpen && (selectedApproval.approvalType === "Treasury multisig" ? <MultisigApprovalDrawer approval={selectedApproval} state={demoState} setState={setDemoState} onClose={closeApproval}/> : <ApprovalDrawer approval={selectedApproval} decision={decision} completedPayment={demoState.dashboard.paymentResult} paymentIdempotencyKey={`${selectedApproval.id}-${demoState.idempotency.payment}`} onPaymentComplete={completePayment} onDecline={declineApproval} onClose={() => { if (decision === "idle") closeApproval(); }} />)}
       {decisionToast && <div role="status" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)]">Purchase {decisionToast}</div>}
-      {resetToast && <div role="status" aria-live="polite" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)] animate-toast-in">Workspace reset</div>}
+      {resetToast && <div role="status" aria-live="polite" className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-[11px] text-white shadow-[0_18px_60px_rgba(23,24,21,0.22)] animate-toast-in">Demo data reset</div>}
       {(introMode === "direct" || introMode === "full") && <AppEntryReveal mode={introMode} onComplete={() => { sessionStorage.removeItem(WITHIN_ENTRY_SOURCE_KEY); sessionStorage.setItem(WITHIN_APP_INTRO_SEEN_KEY,"true"); setIntroMode("ready"); }}/>} 
     </div>
   );

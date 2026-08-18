@@ -10,9 +10,10 @@ type SettingsSection = "Company" | "People & access" | "Treasury";
 
 const inputClass = "mt-2 h-10 w-full rounded-lg border border-border bg-white px-3 text-[11px] text-ink outline-none transition-colors focus:border-accent";
 
-export function SettingsPage({ state, setState }: { state: DemoState; setState: DemoStateSetter; onReset: () => void; onSignOut: () => void }) {
+export function SettingsPage({ state, setState, onReset }: { state: DemoState; setState: DemoStateSetter; onReset: () => void; onSignOut: () => void }) {
   const [section, setSection] = useState<SettingsSection>("Company");
   const [message, setMessage] = useState("");
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const updateCompany = (key: keyof DemoState["company"], value: string | boolean) => setState((current) => ({ ...current, company: { ...current.company, [key]: value } }));
   const updateUser = (key: "firstName" | "lastName", value: string) => setState((current) => ({ ...current, signedInUser: { ...current.signedInUser, [key]: value } }));
 
@@ -32,6 +33,15 @@ export function SettingsPage({ state, setState }: { state: DemoState; setState: 
       <label className="mt-6 flex items-center gap-3 text-[11px]"><input type="checkbox" checked={state.company.requireCompanyEmails} onChange={(event) => updateCompany("requireCompanyEmails", event.target.checked)} />Require company-domain emails</label>
       </div>
       <Button variant="primary" onClick={() => setMessage("Settings saved")} className="mt-8">Save changes</Button>
+      <section className="mt-16 border-t border-border pt-10">
+        <h3 className="text-[18px]">Demo data</h3>
+        <p className="mt-3 text-[10px] leading-5 text-muted">Restore the local workspace to its original presentation state.</p>
+        {confirmingReset ? <div aria-label="Reset demo data confirmation" className="mt-6 border-y border-border py-5">
+          <p className="text-[11px] text-ink">Reset demo data?</p>
+          <p className="mt-2 max-w-lg text-[10px] leading-5 text-muted">This restores local demo purchases, approvals, cards and workspace activity. It does not change your wallet or onchain Arc data.</p>
+          <div className="mt-5 flex gap-3"><Button onClick={() => setConfirmingReset(false)}>Cancel</Button><Button variant="primary" onClick={onReset}>Reset</Button></div>
+        </div> : <Button className="mt-5" onClick={() => setConfirmingReset(true)}>Reset demo data</Button>}
+      </section>
     </section>}
     {section === "People & access" && <section className="mt-12 max-w-2xl">
       <h3 className="text-[22px]">People & access</h3>

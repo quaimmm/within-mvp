@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { completeEmilyPayment, createCleanDemoState, DEMO_STATE_VERSION, DEMO_STORAGE_KEY, restoreDemoState } from "../src/data/demo-state.ts";
 import { resetDemoState } from "../src/lib/demo/reset-demo-state.ts";
+import { ASK_WITHIN_HISTORY_KEY } from "../src/lib/intelligence/ask-within.ts";
 import { createHealthResponse } from "../src/lib/demo/health.ts";
 import type { PaymentResult } from "../src/lib/payments/types.ts";
 
@@ -77,6 +79,45 @@ test("reset completely reseeds storage with fresh idempotency values", () => {
   assert.equal(reset.dashboard.pendingCount, 3);
   assert.notEqual(reset.idempotency.payment, before.idempotency.payment);
   assert.equal(JSON.parse(values.get(DEMO_STORAGE_KEY)!).rules.generatedRule, null);
+});
+
+test("reset clears only demo workspace storage and preserves wallet and Arc evidence", () => {
+  const preserved = {
+    "within:selected-wallet": "metamask",
+    "within:arc-policy-activation:v1": "policy-evidence",
+    "within:employee-credit:evidence:v1": "credit-evidence",
+    "within:arc-transaction-evidence": "treasury-evidence",
+    "unrelated:key": "keep-me",
+  };
+  const values = new Map<string, string>([
+    [DEMO_STORAGE_KEY, "changed-demo-state"],
+    [ASK_WITHIN_HISTORY_KEY, "asked-questions"],
+    ...Object.entries(preserved),
+  ]);
+  const removed: string[] = [];
+  const storage = { getItem: (key: string) => values.get(key) || null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { removed.push(key); values.delete(key); } };
+
+  resetDemoState(storage);
+
+  assert.deepEqual(removed, [DEMO_STORAGE_KEY, ASK_WITHIN_HISTORY_KEY]);
+  assert.equal(JSON.parse(values.get(DEMO_STORAGE_KEY)!).dashboard.pendingCount, 3);
+  assert.equal(values.has(ASK_WITHIN_HISTORY_KEY), false);
+  for (const [key, value] of Object.entries(preserved)) assert.equal(values.get(key), value);
+});
+
+test("Settings requires confirmation and the app reset keeps non-demo session state", async () => {
+  const settings = await readFile(new URL("../src/components/settings-page.tsx", import.meta.url), "utf8");
+  const shell = await readFile(new URL("../src/components/within-app.tsx", import.meta.url), "utf8");
+  const resetFlow = shell.slice(shell.indexOf("function resetDemo()"), shell.indexOf("function openApproval"));
+
+  assert.match(settings, /Reset demo data/);
+  assert.match(settings, /Reset demo data confirmation/);
+  assert.match(settings, /It does not change your wallet or onchain Arc data\./);
+  assert.match(settings, /setConfirmingReset\(false\)/);
+  assert.match(settings, /onClick=\{onReset\}>Reset/);
+  assert.doesNotMatch(resetFlow, /localStorage\.clear|sessionStorage\.clear|removeItem\(WITHIN_/);
+  assert.doesNotMatch(resetFlow, /walletSession|disconnectAppWallet|ARC_POLICY|EMPLOYEE_CREDIT|transactionHash/);
+  assert.match(shell, /Demo data reset/);
 });
 
 test("payment completion cannot create duplicate activity or counter updates", () => {

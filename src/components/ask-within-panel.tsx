@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DemoState } from "@/data/demo-state";
 import { createCompanyContext } from "@/lib/intelligence/company-context";
-import { askWithinQuestion } from "@/lib/intelligence/ask-within";
+import { ASK_WITHIN_HISTORY_KEY, askWithinQuestion } from "@/lib/intelligence/ask-within";
 
-const ASK_HISTORY_KEY = "within:ask-history:v1";
 const suggestions = [
   "Summarise this month's spending.",
   "Which department spends the most?",
@@ -36,7 +35,7 @@ type AskedQuestion = { id: string; text: string };
 function restoreQuestions(): AskedQuestion[] {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(sessionStorage.getItem(ASK_HISTORY_KEY) ?? "[]") as unknown;
+    const parsed = JSON.parse(sessionStorage.getItem(ASK_WITHIN_HISTORY_KEY) ?? "[]") as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item): item is AskedQuestion => Boolean(item && typeof item === "object" && typeof (item as AskedQuestion).id === "string" && typeof (item as AskedQuestion).text === "string")).slice(-6);
   } catch {
@@ -46,7 +45,7 @@ function restoreQuestions(): AskedQuestion[] {
 
 function storeQuestions(questions: AskedQuestion[]) {
   try {
-    sessionStorage.setItem(ASK_HISTORY_KEY, JSON.stringify(questions));
+    sessionStorage.setItem(ASK_WITHIN_HISTORY_KEY, JSON.stringify(questions));
   } catch {
     // History is a convenience; answers continue to work if storage is unavailable.
   }
@@ -54,7 +53,7 @@ function storeQuestions(questions: AskedQuestion[]) {
 
 function clearStoredQuestions() {
   try {
-    sessionStorage.removeItem(ASK_HISTORY_KEY);
+    sessionStorage.removeItem(ASK_WITHIN_HISTORY_KEY);
   } catch {
     // The in-memory conversation can still be cleared.
   }
