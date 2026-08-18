@@ -82,7 +82,15 @@ test("old Company Credit page is archived and the Employee Credit page is render
   assert.doesNotMatch(page, /Your credit limit/);
   assert.match(page, /const walletSession = useWallet\(\)/);
   assert.doesNotMatch(page, /restoreBrowserWallet|subscribeWallet/);
-  assert.match(page, /grid grid-cols-3 divide-x/);
+  assert.match(page, /grid grid-cols-4 divide-x/);
+  assert.match(page, /Manage programmable company credit on Arc\./);
+  assert.match(page, /formatCompanyUsdc\(value, 1\)/);
+  assert.match(page, /\["Utilisation", utilisationLabel\]/);
+  assert.match(page, /\["Status", statusLabel\]/);
+  assert.match(page, /Onchain details/);
+  assert.match(page, /<details className="group mt-14/);
+  assert.match(page, /navigator\.clipboard\.writeText\(creditContractAddress\)/);
+  assert.match(page, /navigator\.clipboard\.writeText\(account\)/);
   assert.match(page, /This wallet is not eligible for Employee Credit\. Eligibility is managed onchain by the company\./);
   assert.match(page, /disabled=\{!snapshot\?\.eligible\|\|active\|\|snapshot\.poolBalance===BigInt\(0\)\}/);
   assert.match(page, /process\.env\.NODE_ENV === "development" && <details/);

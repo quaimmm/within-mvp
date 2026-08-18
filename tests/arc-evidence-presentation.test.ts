@@ -17,7 +17,7 @@ test("Arc payment finality requires genuine Arc result evidence", async () => {
 test("Employee Credit preserves pending state and shows finality only after confirmation", async () => {
   const source = await readFile(new URL("../src/components/employee-credit-page.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /evidence\.status==="confirmed"\?"✓ Final on Arc"/);
+  assert.match(source, /evidence\.status==="confirmed"\?"Final on Arc ✓"/);
   assert.match(source, /"Transaction pending"/);
   assert.match(source, /ARC_TESTNET\.explorerUrl}\/tx\/\$\{evidence\.transactionHash\}/);
   assert.match(source, /View on ArcScan ↗/);

@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { SectionTitle } from "@/components/ui/section-title";
 import { useWallet } from "@/components/wallet-provider";
 import { ARC_TESTNET } from "@/lib/arc/network";
-import { isArcTestnet } from "@/lib/arc/network";
+import { isArcTestnet, shortenAddress } from "@/lib/arc/network";
+import { formatCompanyUsdc } from "@/lib/treasury/company-liquidity";
 import {
   EMPLOYEE_CREDIT_CONTRACT,
   EMPLOYEE_CREDIT_EVIDENCE_KEY,
@@ -374,7 +375,8 @@ export function EmployeeCreditPage() {
       : null;
   const active = creditAccount.status === "success" && creditAccount.value?.active === true && creditAccount.value.outstanding > BigInt(0);
   const nextPayment = active && creditAccount.value ? nextEmployeeCreditInstalment(creditAccount.value) : BigInt(0);
-  const fieldLabel = (field: FieldState<bigint>, formatter = employeeUsdc) =>
+  const balanceUsdc = (value: bigint) => `${formatCompanyUsdc(value, 1)} USDC`;
+  const fieldLabel = (field: FieldState<bigint>, formatter = balanceUsdc) =>
     field.value !== null ? formatter(field.value) :
     field.status === "loading" ? "Loading…" :
     "Unavailable";
@@ -402,11 +404,28 @@ export function EmployeeCreditPage() {
     transactionHash: currentTransactionHash,
     preparationIsCurrent: Boolean(prepared && (prepared.kind === "draw" ? drawPreparedIsCurrent : preparedWalletMatches && isArcTestnet(chainId))),
   });
-  const summary = [
+  const utilisation = creditAccount.value !== null && creditLimit.value !== null && creditLimit.value > BigInt(0)
+    ? Number((creditAccount.value.outstanding * BigInt(1_000)) / creditLimit.value) / 10
+    : null;
+  const utilisationLabel = utilisation === null
+    ? creditAccount.status === "loading" || creditLimit.status === "loading" ? "Loading…" : "Unavailable"
+    : `${Number.isInteger(utilisation) ? utilisation.toFixed(0) : utilisation.toFixed(1)}%`;
+  const statusLabel = active
+    ? "Active"
+    : eligibility.value === true
+      ? "Available"
+      : eligibility.value === false
+        ? "Not eligible"
+        : eligibility.status === "loading" ? "Checking…" : "Unavailable";
+  const primarySummary = [
     ["Available credit", fieldLabel(availableCredit)],
-    ["Outstanding", creditAccount.value !== null ? employeeUsdc(creditAccount.value.outstanding) : creditAccount.status === "loading" ? "Loading…" : "Unavailable"],
-    ["Next repayment", active ? employeeUsdc(nextPayment) : "—"],
+    ["Outstanding", creditAccount.value !== null ? balanceUsdc(creditAccount.value.outstanding) : creditAccount.status === "loading" ? "Loading…" : "Unavailable"],
+    ["Utilisation", utilisationLabel],
+    ["Status", statusLabel],
+  ];
+  const supportingSummary = [
     ["Eligibility", eligibility.value !== null ? eligibility.value ? "Eligible" : "Not eligible" : eligibility.status === "loading" ? "Checking…" : "Unavailable"],
+    ["Next repayment", active ? balanceUsdc(nextPayment) : "—"],
     ["Repayment progress", active && creditAccount.value ? `${creditAccount.value.instalmentsPaid} / ${creditAccount.value.totalInstalments}` : "No active credit"],
     ["Pool liquidity", fieldLabel(poolBalance)],
   ];
@@ -419,10 +438,11 @@ export function EmployeeCreditPage() {
     ["Credit limit", creditLimit],
     ["RPC chain ID", rpcChainId],
   ];
+  const creditContractAddress = EMPLOYEE_CREDIT_CONTRACT;
 
   return <div className="mx-auto max-w-[1120px]">
     <div className="flex items-start justify-between">
-      <SectionTitle title="Employee Credit" description="Simple employee credit, settled on Arc Testnet."/>
+      <SectionTitle title="Credit" description="Manage programmable company credit on Arc."/>
       <div className="flex gap-3">
         <Button onClick={()=>void refresh()} disabled={isRefreshing}>{isRefreshing?"Refreshing…":"Refresh"}</Button>
         <Button onClick={()=>void openRepayment()} disabled={!active}>Make repayment</Button>
@@ -432,11 +452,12 @@ export function EmployeeCreditPage() {
     {!EMPLOYEE_CREDIT_CONTRACT&&<p className="mt-9 text-[10px] text-muted">Employee Credit is awaiting its Arc Testnet deployment.</p>}
     {account&&eligibility.status==="success"&&!eligibility.value&&<p className="mt-9 text-[10px] text-muted">This wallet is not eligible for Employee Credit. Eligibility is managed onchain by the company.</p>}
     {eligibility.value===true&&poolBalance.status==="success"&&poolBalance.value===BigInt(0)&&<p className="mt-9 text-[10px] text-muted">Credit is available, but the pool must be funded before it can be used.</p>}
-    <section className="mt-14 grid grid-cols-3 divide-x divide-border border-y border-border py-8">
-      {summary.slice(0,3).map(([label,value],index)=><div key={label} className={index===0?"pr-8":"px-8"}><p className="text-[9px] text-muted">{label}</p><p className="mt-3 text-[17px]">{value}</p></div>)}
+    <section className="mt-14 grid grid-cols-4 divide-x divide-border border-y border-border py-8">
+      {primarySummary.map(([label,value],index)=><div key={label} className={index===0?"pr-8":"px-8"}><p className="text-[9px] text-muted">{label}</p><p className="mt-3 text-[17px]">{value}</p></div>)}
     </section>
+    <p className="mt-8 max-w-[620px] text-[10px] leading-5 text-muted">Credit is available to eligible employees for company spending under Within rules.</p>
     <dl className="mt-12 divide-y divide-border border-y border-border text-[10px]">
-      {summary.slice(3).map(([label,value])=><div key={label} className="flex justify-between py-4"><dt className="text-muted">{label}</dt><dd>{value}</dd></div>)}
+      {supportingSummary.map(([label,value])=><div key={label} className="flex justify-between py-4"><dt className="text-muted">{label}</dt><dd>{value}</dd></div>)}
     </dl>
     {!active&&<p className="mt-8 text-[10px] text-muted">No active employee credit.</p>}
     {process.env.NODE_ENV === "development" && <details className="mt-8 border-t border-border pt-5 text-[9px] text-muted">
@@ -453,7 +474,17 @@ export function EmployeeCreditPage() {
         )}
       </dl>
     </details>}
-    {evidence&&<section className="mt-14 border-t border-border pt-7"><p className="text-[9px] text-muted">Arc transaction</p><p className="mt-2 text-[17px] text-ink">{employeeUsdc(BigInt(evidence.rawAmount))}</p><p className={`mt-2 text-[11px] ${evidence.status==="confirmed"?"text-success":evidence.status==="failed"?"text-[#9a4d45]":"text-muted"}`}>{evidence.status==="confirmed"?"✓ Final on Arc":evidence.status==="failed"?"Transaction failed":"Transaction pending"}</p><p className="mt-2 text-[9px] text-muted">Arc Testnet</p><a className="mt-3 inline-block text-[10px] text-accent hover:underline" href={`${ARC_TESTNET.explorerUrl}/tx/${evidence.transactionHash}`} target="_blank" rel="noreferrer">View on ArcScan ↗</a>{evidence.status==="submitted"&&<Button className="ml-4" onClick={()=>void recover(evidence)}>Check status</Button>}<details className="mt-5 text-[9px] text-muted"><summary>Transaction details</summary><dl className="mt-3 space-y-2"><div className="grid grid-cols-[80px_1fr] gap-4"><dt>Hash</dt><dd className="break-all">{evidence.transactionHash}</dd></div>{evidence.blockNumber&&<div className="grid grid-cols-[80px_1fr] gap-4"><dt>Block</dt><dd>{evidence.blockNumber}</dd></div>}</dl></details></section>}
+    {evidence&&<section className="mt-14 border-t border-border pt-7"><p className="text-[9px] text-muted">Arc transaction</p><p className="mt-2 text-[17px] text-ink">{employeeUsdc(BigInt(evidence.rawAmount))}</p><p className={`mt-2 text-[11px] ${evidence.status==="confirmed"?"text-success":evidence.status==="failed"?"text-[#9a4d45]":"text-muted"}`}>{evidence.status==="confirmed"?"Final on Arc ✓":evidence.status==="failed"?"Transaction failed":"Transaction pending"}</p><a className="mt-3 inline-block text-[10px] text-accent hover:underline" href={`${ARC_TESTNET.explorerUrl}/tx/${evidence.transactionHash}`} target="_blank" rel="noreferrer">View on ArcScan ↗</a>{evidence.status==="submitted"&&<Button className="ml-4" onClick={()=>void recover(evidence)}>Check status</Button>}</section>}
+    <details className="group mt-14 border-t border-border pt-5 text-[10px] text-muted">
+      <summary className="cursor-pointer list-none py-2">Onchain details <span className="group-open:hidden" aria-hidden="true">⌄</span><span className="hidden group-open:inline" aria-hidden="true">⌃</span></summary>
+      <dl className="mt-4 divide-y divide-border border-y border-border">
+        <div className="flex items-center justify-between gap-8 py-4"><dt>Network</dt><dd className="text-ink">Arc Testnet</dd></div>
+        {creditContractAddress&&<div className="flex items-center justify-between gap-8 py-4"><dt>Credit contract</dt><dd className="flex items-center gap-3 text-ink"><span>{shortenAddress(creditContractAddress)}</span><button className="text-accent hover:underline" type="button" onClick={()=>void navigator.clipboard.writeText(creditContractAddress)}>Copy</button></dd></div>}
+        {account&&<div className="flex items-center justify-between gap-8 py-4"><dt>Connected account</dt><dd className="flex items-center gap-3 text-ink"><span>{shortenAddress(account)}</span><button className="text-accent hover:underline" type="button" onClick={()=>void navigator.clipboard.writeText(account)}>Copy</button></dd></div>}
+        {latestBlock.value!==null&&<div className="flex items-center justify-between gap-8 py-4"><dt>Latest block</dt><dd className="text-ink">{latestBlock.value.toString()}</dd></div>}
+        {evidence&&<div className="flex items-center justify-between gap-8 py-4"><dt>Latest transaction</dt><dd className="flex items-center gap-3 text-ink"><span>{shortenAddress(evidence.transactionHash)}</span><button className="text-accent hover:underline" type="button" onClick={()=>void navigator.clipboard.writeText(evidence.transactionHash)}>Copy</button><a className="text-accent hover:underline" href={`${ARC_TESTNET.explorerUrl}/tx/${evidence.transactionHash}`} target="_blank" rel="noreferrer">ArcScan ↗</a></dd></div>}
+      </dl>
+    </details>
     {drawer&&<><button aria-label="Close credit drawer" className="fixed inset-y-0 left-[224px] right-0 top-[72px] z-30 bg-ink/10" onClick={()=>setDrawer(null)}/><aside className="fixed bottom-0 right-0 top-[72px] z-40 w-[520px] overflow-y-auto border-l border-border bg-white p-8 shadow-[-24px_0_70px_rgba(23,24,21,.08)]">
       <div className="flex justify-between"><h2 className="text-[28px]">{drawer==="draw"?"Use credit":"Make repayment"}</h2><button aria-label="Close drawer" onClick={()=>setDrawer(null)}>×</button></div>
       {drawer==="draw"?<>
@@ -462,7 +493,7 @@ export function EmployeeCreditPage() {
         {!reviewed&&!prepared?<Button variant="primary" className="mt-7 w-full" onClick={()=>void reviewCredit()}>Review credit</Button>:null}
       </>:creditAccount.value?.active&&creditAccount.value.outstanding>BigInt(0)?<>
         <p className="mt-8 text-[10px] text-muted">Early repayment is available. You can repay this instalment early.</p>
-        <dl className="mt-6 divide-y divide-border border-y border-border text-[10px]"><div className="flex justify-between py-4"><dt className="text-muted">Outstanding</dt><dd>{employeeUsdc(creditAccount.value.outstanding)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Next repayment</dt><dd>{employeeUsdc(nextPayment)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Repayment progress</dt><dd>{creditAccount.value.instalmentsPaid} / {creditAccount.value.totalInstalments}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">USDC balance</dt><dd>{employeeUsdcBalance===null?"Unavailable":employeeUsdc(employeeUsdcBalance)}</dd></div></dl>
+        <dl className="mt-6 divide-y divide-border border-y border-border text-[10px]"><div className="flex justify-between py-4"><dt className="text-muted">Outstanding</dt><dd>{balanceUsdc(creditAccount.value.outstanding)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Next repayment</dt><dd>{balanceUsdc(nextPayment)}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">Repayment progress</dt><dd>{creditAccount.value.instalmentsPaid} / {creditAccount.value.totalInstalments}</dd></div><div className="flex justify-between py-4"><dt className="text-muted">USDC balance</dt><dd>{employeeUsdcBalance===null?"Unavailable":balanceUsdc(employeeUsdcBalance)}</dd></div></dl>
         {repaymentDetailsLoading&&<p className="mt-5 text-[10px] text-muted">Checking allowance…</p>}
         {!prepared&&!repaymentDetailsLoading&&allowance!==null&&<Button variant="primary" className="mt-7 w-full" onClick={()=>void prepareRepayment()}>{allowance<nextPayment?"Prepare USDC approval":"Prepare repayment"}</Button>}
         {approvalEvidence&&<p className="mt-5 text-[10px] text-muted">USDC approved. Continue to repayment.</p>}
